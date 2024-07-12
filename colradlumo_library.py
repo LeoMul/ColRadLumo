@@ -11,6 +11,8 @@ import numpy as np
 NUCLEON_MASS_KG = 1.67493e-27
 SOLAR_MASS_KG = 1.989e+30 
 SQRT_TWOPI = 2.5066282746310002
+SQRT_PI = 1.7724538509055159
+
 #Planck's constant times c in cgs e.g: erg cm s 
 HC_CGS = 6.63e-34 * 3e8 * 1e7 * 1e2
 
@@ -123,10 +125,11 @@ class colradlumo_calc:
         #don't ever change this unless you want to give me a headache
         #if we didn't already normalise pops by the paritition function (which is the default option)
         #then do it.
+        pops = colradpy_run.data['processed']['pops_no_norm'][:,met,0,0]
+        sum_pops = 1 + np.sum(pops)
+        self.pops_normed = pops / sum_pops
         if not norm_pops_for_pecs:
-            pops = colradpy_run.data['processed']['pops_no_norm'][:,met,0,0]
             #ground =1 , so not in array. add it on.
-            sum_pops = 1 + np.sum(pops)
             pec /= sum_pops
 
         wl_vac_nm = colradpy_run.data['processed']['wave_vac']
@@ -306,9 +309,9 @@ def gaussian_kernel_lumo_density(central_wavelength_nm,beta,wavelength_range_nm)
     #for this simple case, i assume we integrate over the whole Gaussian. 
 
     #lumo in ergs/s/ang
-    norm_factor = 1.0 / (SQRT_TWOPI * beta * central_wavelength_nm*10)
+    norm_factor = 1.0 / (SQRT_PI * beta * central_wavelength_nm*10)
     
-    expon/= np.sqrt(2)*beta 
+    expon/= beta 
 
     return norm_factor * np.exp (-np.power(expon,2) ) 
 
