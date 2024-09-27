@@ -90,21 +90,29 @@ def combine_requested_lines(list_of_requested_lines:list[requested_lines]) -> re
 
 
 class colradlumo_calc:
-    def __init__(self,adf04_path:str,density:float,temp:float,atomic_mass_number:float):
+    def __init__(self,adf04_path:str,density,temp,atomic_mass_number:float):
+
+
         self.adf04_path = adf04_path
         self.density = density
         self.temp = temp 
+        #print(density)
         self.atomic_mass_number = atomic_mass_number
         self.atomic_mass_kg = atomic_mass_number * NUCLEON_MASS_KG
 
         met = np.array([0])#never change this unless you know what you're doing...
-        density = np.array([density])
-        temp = np.array([temp])
+        #density = np.array([density])
+        #temp = np.array([temp])
         t = process_time()
 
         #this is the default option, i 
         #just coded it this way as a failsafe.
         norm_pops_for_pecs = False
+
+        num_temps = len(temp)
+        num_dens = len(density)
+        
+
 
         colradpy_run = colradpy(adf04_path,met,temp,density,use_ionization=False,suppliment_with_ecip=False,use_recombination_three_body=False,use_recombination=False,rate_interp_col='cubic',default_pop_norm=norm_pops_for_pecs)
         colradpy_run.make_electron_excitation_rates()
@@ -120,17 +128,24 @@ class colradlumo_calc:
         t = process_time() - t 
         print('ColRadPy cpu time (sec) - {:7.2f}'.format(t))
         
-        pec =  colradpy_run.data['processed']['pecs'][:,met,0,0]
+        pec =  colradpy_run.data['processed']['pecs'][:,0,:,:]
         
         #don't ever change this unless you want to give me a headache
         #if we didn't already normalise pops by the paritition function (which is the default option)
         #then do it.
-        pops = colradpy_run.data['processed']['pops_no_norm'][:,met,0,0]
-        sum_pops = 1 + np.sum(pops)
+        #I'm essentially overriding anywhere where the user can mess with the code.
+
+        
+        pops = colradpy_run.data['processed']['pops_no_norm'][:,0,:,:]
+        
+        #need to do a sum here over the right axis
+        sum_pops = 1.0 + np.sum(pops,axis=0)
         self.pops_normed = pops / sum_pops
         if not norm_pops_for_pecs:
             #ground =1 , so not in array. add it on.
             pec /= sum_pops
+
+
 
         wl_vac_nm = colradpy_run.data['processed']['wave_vac']
         wl_air_nm = colradpy_run.data['processed']['wave_air']
@@ -140,16 +155,34 @@ class colradlumo_calc:
         self.wl_vac_ang = wl_vac_nm*10
         self.wl_air_nm  = wl_air_nm 
         self.wl_air_ang = wl_air_nm*10        
+        self.num_dens = num_dens
+        self.num_temps = num_temps
+        self.num_wl = len(wl_air_nm)
 
         num_ions_in_a_solar_mass = SOLAR_MASS_KG / self.atomic_mass_kg
 
+        lumo_per_ion = np.zeros([len(wl_air_nm),num_temps,num_dens])
+        #print('dim check:')
+        #print(np.shape(pec))
+        #print(np.shape(lumo_per_ion))
+
+        for ii in range(0,num_dens):
+            lumo_per_ion[:,:,ii] = pec[:,:,ii] * density[ii]
+
+        lumo_per_ion = lumo_per_ion * num_ions_in_a_solar_mass
+
+
         #we already normalised the pec
-        self.luminosity_photons_per_solar_mass = (pec * density  * num_ions_in_a_solar_mass).flatten()
+        self.luminosity_photons_per_solar_mass = lumo_per_ion.copy()
 
         #CONVERT  NM TO CM
-        self.photon_energies_ergs = HC_CGS / (wl_vac_nm*1e-7) .flatten()
+        self.photon_energies_ergs = HC_CGS / (wl_vac_nm*1e-7) #.flatten()
+        self.luminosity_ergs_per_solar_mass = self.luminosity_photons_per_solar_mass
 
-        self.luminosity_ergs_per_solar_mass = self.luminosity_photons_per_solar_mass * self.photon_energies_ergs
+        print(np.shape(self.photon_energies_ergs))
+
+        for ii in range(0,len(wl_air_nm)):
+            self.luminosity_ergs_per_solar_mass[ii,:,:] = self.luminosity_photons_per_solar_mass[ii,:,:] * self.photon_energies_ergs[ii]
 
         #atomic data
         self.avalues = colradpy_run.data['cr_matrix']['A_ji']
@@ -165,20 +198,34 @@ class colradlumo_calc:
         self.scaled_lumo_photos = [] 
         self.scaled_lumo_ergs = []
 
-    def predict_mass_for_requested_lumo_wl(self,wavelength_requested_nm,spectral_line_requested_ergs_s):
+    def predict_mass_for_requested_lumo_wl(self,wavelength_requested_nm,spectral_line_requested_ergs_s,temp,density):
         print('Requesting L = {:7.5E} ph/s for spectral line λ = {:11.4f} nm'.format(spectral_line_requested_ergs_s,wavelength_requested_nm) )
         
         index = np.argmin(np.abs(self.wl_vac_nm - wavelength_requested_nm))
-        required_mass = spectral_line_requested_ergs_s / self.luminosity_ergs_per_solar_mass[index]
+        
+        temp_index = np.argmin(np.abs(self.temp - temp))
+        dens_index = np.argmin(np.abs(self.density - density))
+
+        required_mass = spectral_line_requested_ergs_s / self.luminosity_ergs_per_solar_mass[index,temp_index,dens_index]
         print('Closest wavelength found: λ  = {:11.4f} nm'.format(self.wl_vac_nm[index]))
-        print('Luminosity in one solar mass: {:7.5E} ergs/s , {:7.5E} ph/s'.format(self.luminosity_ergs_per_solar_mass[index],self.luminosity_photons_per_solar_mass[index]))
+        print('Luminosity in one solar mass: {:7.5E} ergs/s , {:7.5E} ph/s'.format(self.luminosity_ergs_per_solar_mass[index,temp_index,dens_index],self.luminosity_photons_per_solar_mass[index,temp_index,dens_index]))
         print('Require ion-mass of {:11.4f} M_solar for requested luminosity. '.format(required_mass))
 
 
 
     def scale_lumo_by_ion_mass(self,mass_of_ion_solar_units:float):
-        self.scaled_lumo_photos = self.luminosity_photons_per_solar_mass * mass_of_ion_solar_units
-        self.scaled_lumo_ergs = self.luminosity_ergs_per_solar_mass * mass_of_ion_solar_units
+
+        self.scaled_lumo_photos = np.zeros([
+            self.num_wl,
+            self.num_temps,
+            self.num_dens,
+            len(mass_of_ion_solar_units)
+        ])
+        self.scaled_lumo_ergs = self.scaled_lumo_photos.copy()
+
+        for ii in range(0,len(mass_of_ion_solar_units)):
+            self.scaled_lumo_photos[:,:,:,ii] = self.luminosity_photons_per_solar_mass * mass_of_ion_solar_units[ii]
+            self.scaled_lumo_ergs[:,:,:,ii] = self.luminosity_ergs_per_solar_mass * mass_of_ion_solar_units[ii]
 
     def select_strongest_n_lines(self,n_select:int) -> requested_lines:
         #arguments for requested_lines_class
