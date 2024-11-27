@@ -16,7 +16,14 @@ SQRT_PI = 1.7724538509055159
 #Planck's constant times c in cgs e.g: erg cm s 
 HC_CGS = 6.63e-34 * 3e8 * 1e7 * 1e2
 
+C_CGS = 3.00E10
+ELECTRON_MASS_G = 9.11E-28
+ELECTRIC_CHARGE_CGS_ESU = 4.8e-10
+SOBOLEV_CONST = np.pi * ELECTRIC_CHARGE_CGS_ESU * ELECTRIC_CHARGE_CGS_ESU\
+                /(ELECTRON_MASS_G * C_CGS)
 
+
+OSCILLATOR_CONST = 6.6702E15
 
 class requested_lines:
     def __init__(self,wavelengths,avalues,pecs,pec_levels,lumo_ph,lumo_erg,csf_labels,angular_momenta,energies):
@@ -31,12 +38,13 @@ class requested_lines:
         self.csfs_labels = csf_labels
         self.angular_momenta = angular_momenta
         self.energy_levels_cm = energies
+        self.wl_value = []
 
         self.header = 'wlvac(nm),  transition,     E_j (cm-1),         Level j,     E_i (cm-1),        Level i, A_ij(s^-1), pec cm^3/s,   L (ph/s),  L (erg/s)'
         self.string_format = ' {:8.2f},     {:2} - {:2}, {:14.3f},  {:14}, {:14.3f}, {:10}, {:10.2E}, {:10.2E}, {:10.2E}, {:10.2E}'
         self.rule = 136*'-'
         strings = [] 
-
+        self.labels =[]
         for jj in range(0,len(wavelengths)):
             lumo = self.lumo_ph[jj]
             flux = self.lumo_erg[jj]
@@ -53,11 +61,14 @@ class requested_lines:
             if len(upper_csf) < 14:
                 upper_csf = (14-len(upper_csf))*' ' + upper_csf
 
+            self.labels.append(r'{} $\to$ {}'.format(upper_csf,lower_csf))
+
             upper_wav = self.energy_levels_cm[upper-1]
             lower_wav = self.energy_levels_cm[lower-1]
             avalue = self.avalues[upper-1,lower-1]
             wavel = self.wl_vac_nm[jj]
-            this_pec = self.pec[jj][0]
+            self.wl_value.append(wavel)
+            this_pec = self.pec[jj]
             strings.append(self.string_format.format(wavel,
                                                                lower,
                                                                upper,
@@ -79,6 +90,25 @@ class requested_lines:
         for string in self.strings:
             print(string)
         print(self.rule)
+    def write(self,mass,dens,temp_eV):
+        temp_K = temp_eV*11600
+        filename = 'line_lumo_pec_teiii_{:5.3e}Msun_{:5.0e}K_{:5.3e}cm-3.dat'.format(mass,temp_K,dens)
+        
+        f=  open(filename,'w')
+        f.write('T_e = {:5.0f} K\n'.format(temp_K))
+        f.write('n_e = {:5.3e} cm^(-3)\n'.format(dens))
+        f.write('M_Te2+ = {:5.3e} M_sun\n'.format(mass))
+
+        f.write(self.rule+'\n')
+        f.write(self.header+'\n')
+        f.write(self.rule+'\n')
+
+        for string in self.strings:
+            f.write(string+'\n')
+        f.write(self.rule+'\n')
+        f.close()
+
+
 
 
 def combine_requested_lines(list_of_requested_lines:list[requested_lines]) -> requested_lines:
@@ -129,7 +159,8 @@ class colradlumo_calc:
         print('ColRadPy cpu time (sec) - {:7.2f}'.format(t))
         
         pec =  colradpy_run.data['processed']['pecs'][:,0,:,:]
-        
+
+        pec[pec<0] = 0.0 #1e-30
         #don't ever change this unless you want to give me a headache
         #if we didn't already normalise pops by the paritition function (which is the default option)
         #then do it.
@@ -140,6 +171,8 @@ class colradlumo_calc:
         
         #need to do a sum here over the right axis
         sum_pops = 1.0 + np.sum(pops,axis=0)
+
+        self.sum_pops = sum_pops
         self.pops_normed = pops / sum_pops
         if not norm_pops_for_pecs:
             #ground =1 , so not in array. add it on.
@@ -150,6 +183,7 @@ class colradlumo_calc:
         wl_vac_nm = colradpy_run.data['processed']['wave_vac']
         wl_air_nm = colradpy_run.data['processed']['wave_air']
         self.pec = pec 
+        #print(pec[pec<0])
 
         self.wl_vac_nm  = wl_vac_nm 
         self.wl_vac_ang = wl_vac_nm*10
@@ -160,6 +194,8 @@ class colradlumo_calc:
         self.num_wl = len(wl_air_nm)
 
         num_ions_in_a_solar_mass = SOLAR_MASS_KG / self.atomic_mass_kg
+
+        self.num_ions_in_a_solar_mass = num_ions_in_a_solar_mass
 
         lumo_per_ion = np.zeros([len(wl_air_nm),num_temps,num_dens])
         #print('dim check:')
@@ -177,15 +213,16 @@ class colradlumo_calc:
 
         #CONVERT  NM TO CM
         self.photon_energies_ergs = HC_CGS / (wl_vac_nm*1e-7) #.flatten()
-        self.luminosity_ergs_per_solar_mass = self.luminosity_photons_per_solar_mass
+        self.luminosity_ergs_per_solar_mass = self.luminosity_photons_per_solar_mass.copy()
 
         print(np.shape(self.photon_energies_ergs))
-
+        print(self.photon_energies_ergs[0])
         for ii in range(0,len(wl_air_nm)):
             self.luminosity_ergs_per_solar_mass[ii,:,:] = self.luminosity_photons_per_solar_mass[ii,:,:] * self.photon_energies_ergs[ii]
 
         #atomic data
         self.avalues = colradpy_run.data['cr_matrix']['A_ji']
+
         self.energy_levels_cm = colradpy_run.data['atomic']['energy']
         self.csfs_labels = colradpy_run.data['atomic']['config']
         #self.terms = colradpy_run.data['atomic']['nist_conf_form']
@@ -205,6 +242,8 @@ class colradlumo_calc:
         
         temp_index = np.argmin(np.abs(self.temp - temp))
         dens_index = np.argmin(np.abs(self.density - density))
+        print('using temp: {:10.2f}eV ~ {:10.2f} K'.format(self.temp[temp_index],self.temp[temp_index]*11600))
+        print('using dens: {:10.2e} cm-3'.format(self.density[dens_index]))
 
         required_mass = spectral_line_requested_ergs_s / self.luminosity_ergs_per_solar_mass[index,temp_index,dens_index]
         print('Closest wavelength found: λ  = {:11.4f} nm'.format(self.wl_vac_nm[index]))
@@ -213,7 +252,7 @@ class colradlumo_calc:
 
 
 
-    def scale_lumo_by_ion_mass(self,mass_of_ion_solar_units:float):
+    def scale_lumo_by_ion_mass(self,mass_of_ion_solar_units):
 
         self.scaled_lumo_photos = np.zeros([
             self.num_wl,
@@ -221,22 +260,31 @@ class colradlumo_calc:
             self.num_dens,
             len(mass_of_ion_solar_units)
         ])
+        self.mass = mass_of_ion_solar_units
         self.scaled_lumo_ergs = self.scaled_lumo_photos.copy()
 
         for ii in range(0,len(mass_of_ion_solar_units)):
             self.scaled_lumo_photos[:,:,:,ii] = self.luminosity_photons_per_solar_mass * mass_of_ion_solar_units[ii]
             self.scaled_lumo_ergs[:,:,:,ii] = self.luminosity_ergs_per_solar_mass * mass_of_ion_solar_units[ii]
 
-    def select_strongest_n_lines(self,n_select:int) -> requested_lines:
+    def select_strongest_n_lines(self,n_select:int,temperature,density,mass) -> requested_lines:
         #arguments for requested_lines_class
         #self,wavelengths,avalues,pecs,pec_levels,lumo_ph,lumo_erg,csf_labels,angular_momenta,energies
 
         #selecting max n
-        arguments =  np.argpartition(self.scaled_lumo_ergs, -n_select)[-n_select:]
+        #print(np.shape(self.scaled_lumo_ergs))
 
+        density_index = np.argmin(np.abs(self.density - density))
+        temp_index = np.argmin(np.abs(self.temp - temperature))
+        mass_index = np.argmin(np.abs(self.mass - mass))
+        arguments =  np.argpartition(self.scaled_lumo_ergs[:,temp_index,density_index,mass_index].flatten(), -n_select)[-n_select:]
         #sorting from strongest to weakest of this subset
-        arguments = arguments[np.argsort(self.scaled_lumo_ergs[arguments])][::-1]
-
+        #print('Using parameters: ')
+        #print('Te = {} eV'.format(self.temp[temp_index]))
+        #print('Ne = {} cm-3'.format(self.density[density_index]))
+        #print('M  = {} Msun'.format(self.mass[mass_index]))
+        array_to_be_sorted = self.scaled_lumo_ergs[:,temp_index,density_index].flatten()
+        arguments = arguments[np.argsort(array_to_be_sorted[arguments])][::-1]
         #if the user did not scale by a mass yet, just set it to one solar mass
         if len(self.scaled_lumo_ergs) == 0:
             print('scale_lumo_by_ion_mass() hasnt been called - scaling to unit solar mass')
@@ -245,15 +293,109 @@ class colradlumo_calc:
         #putting all this in the class. 
         requestlines = requested_lines(self.wl_vac_nm[arguments],
                                        self.avalues,
-                                       self.pec[arguments],
+                                       self.pec[arguments,temp_index,density_index].flatten(),
                                        self.pec_levels[arguments],
-                                       self.scaled_lumo_photos[arguments],
-                                       self.scaled_lumo_ergs[arguments],
+                                       self.scaled_lumo_photos[arguments,temp_index,density_index,mass_index].flatten(),
+                                       self.scaled_lumo_ergs[arguments,temp_index,density_index,mass_index].flatten(),
                                        self.csfs_labels,
                                        self.angular_momenta,
                                        self.energy_levels_cm)
         return requestlines
 
+    def optical_depth(self,temperature,density,time_exp_days,velocity_c,mass_solarunits,ion_string='',printing=False):
+        
+        #select the densities closest to the user selectrion.
+        density_index = np.argmin(np.abs(self.density - density))
+        temp_index = np.argmin(np.abs(self.temp - temperature))
+
+        #for getting the populations
+        populations = np.zeros(len(self.pops_normed[:,temp_index,density_index])+1)
+
+        #ColRadPy's pops_no_norm as ground=1 and not included in the arry, include this and normalise.
+        populations[1:] = self.colradpy_class.data['processed']['pops_no_norm'][:,0,temp_index,density_index]#self.pops_normed[:,temp_index,density_index]
+        populations[0] = 1.0 #/ self.sum_pops[temp_index,density_index]
+        populations/= np.sum(populations)
+        
+        #Setting the Sob density array
+        num_lines = len(self.pec_levels)
+        optical_depth = np.ones(num_lines)* SOBOLEV_CONST#Sobolev const = e^2 / (m_e c)
+        time_exp_cgs = time_exp_days * 24.0 * 3600.0
+        volume = 4.0 * np.pi * (C_CGS* time_exp_cgs*velocity_c)**3 / 3.0
+        num_ions = mass_solarunits * self.num_ions_in_a_solar_mass
+
+    
+
+        header = 'wlvac(nm),  transition,     E_j (cm-1),         Level j,      Pop(j)     E_i (cm-1),        Level i,      Pop(j),  A_ij(s^-1),   SobDepth'
+
+
+        if printing:
+            print('Requested density: {:10.2e}'.format(density))
+            print('Using density:     {:10.2e}'.format(self.density[density_index] ))
+            print('Requested temp:    {:10.2f}'.format(temperature))
+            print('Using temp:        {:10.2f}'.format(self.temp[temp_index] ))
+            print('Volume:            {:10.2e}'.format(volume))
+            print('Num ions:          {:10.2e}'.format(num_ions))
+            print('Ion Density:       {:10.2e}'.format(num_ions/volume))
+        fvalue_array = np.zeros(num_lines)
+        strings = []
+        string_format = ' {:8.2f},     {:2} - {:2}, {:14.3f},  {:14}, {:10.2E}, {:14.3f}, {:10}, {:10.2E}, {:10.2E}, {:10.2E}, {:10.2E}'
+        print(header)
+        for ii in range(0, num_lines):
+            
+            upper = self.pec_levels[ii][0]+1
+            lower = self.pec_levels[ii][1]+1
+            correction = 1.0 - self.statistical_weights[lower-1]*populations[upper-1]\
+                                /self.statistical_weights[upper-1]*populations[lower-1]
+            
+            #Convert A -value to f value
+            f_value = self.avalues[upper-1,lower-1] * self.statistical_weights[upper-1]\
+                        /self.statistical_weights[lower-1] * self.wl_vac_ang[ii]**2
+            f_value /= OSCILLATOR_CONST
+            fvalue_array[ii] = f_value
+
+           # print(f_value)
+            #calculate optical depth - put wavelength in MKS as so is the Sob factor... time_exp in secs?
+
+            factor = f_value * self.wl_vac_nm[ii] * 1e-7 * time_exp_cgs * populations[lower-1] * num_ions * correction / volume
+            optical_depth[ii] *= factor
+
+            upper_j   = self.angular_momenta[upper-1]
+            lower_j   = self.angular_momenta[lower-1]
+            upper_csf = self.csfs_labels[upper-1]+'{:5}'.format(upper_j)
+            lower_csf = self.csfs_labels[lower-1]+'{:5}'.format(lower_j)
+            if len(lower_csf) < 15:
+                lower_csf = (15-len(lower_csf))*' ' + lower_csf
+            if len(upper_csf) < 15:
+                upper_csf = (15-len(upper_csf))*' ' + upper_csf
+            upper_wav = self.energy_levels_cm[upper-1]
+            lower_wav = self.energy_levels_cm[lower-1]
+            wavel = self.wl_vac_nm[ii]
+
+            strings.append(string_format.format(          wavel,
+                                                               lower,
+                                                               upper,
+                                                               lower_wav,
+                                                               lower_csf,
+                                                               populations[lower-1],
+                                                               upper_wav,
+                                                               upper_csf,
+                                                               populations[upper-1],
+                                                               self.avalues[upper-1,lower-1],
+                                                               optical_depth[ii],
+                                                               (1.0 - np.exp(-optical_depth[ii])) / optical_depth[ii]
+                                                        ))
+        #print(header)
+        for ii in range(0,len(optical_depth)):
+                upper = self.pec_levels[ii][0]
+                lower = self.pec_levels[ii][1]
+                if ii ==0 :
+                    #print(fvalue_array[ii])
+                    print('{:6}'.format(ion_string),strings[ii])
+                if self.avalues[upper,lower] > 1e4:
+                #print(lower,populations[lower-1])
+                    #print(fvalue_array[ii])
+                    print('{:6}'.format(ion_string),strings[ii])
+                    break
 
     def display_requested_lines_array(self,requested_lines:float,wl_tol:float):
         header = 'wlvac(nm),  transition,     E_j (cm-1),         Level j,     E_i (cm-1),        Level i, A_ij(s^-1), pec cm^3/s,   L (ph/s),  L (erg/s)'
@@ -338,10 +480,12 @@ class colradlumo_calc:
             print(string)
         print(136*'-')
 
-    def line_broadening_lumo_density(self,velocity_frac_speed_light,wavelength_array):
+    def line_broadening_lumo_density(self,velocity_frac_speed_light,wavelength_array,temperature,density):
+        density_index = np.argmin(np.abs(self.density - density))
+        temp_index = np.argmin(np.abs(self.temp - temperature))
         broadened_spec = np.zeros_like(wavelength_array) 
         for (index,wavelength) in enumerate(self.wl_air_nm.flatten()):
-            broadened_spec += self.scaled_lumo_ergs[index] * gaussian_kernel_lumo_density(wavelength,velocity_frac_speed_light,wavelength_array)
+            broadened_spec += self.scaled_lumo_ergs[index,temp_index,density_index] * gaussian_kernel_lumo_density(wavelength,velocity_frac_speed_light,wavelength_array)
         
 
         return broadened_spec
