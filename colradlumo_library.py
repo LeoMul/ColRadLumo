@@ -480,6 +480,92 @@ class colradlumo_calc:
             print(string)
         print(136*'-')
 
+
+    def write_requested_lines_array(self,requested_lines:float,wl_tol:float,file:str):
+        header = 'wlvac(nm),  transition,     E_j (cm-1),         Level j,     E_i (cm-1),        Level i, A_ij(s^-1), pec cm^3/s,   L (ph/s),  L (erg/s)'
+        
+        #header_string = ' {:8},     {:2} - {:2}, {:14},  {:1,}, {:14}, {:10}, {:10}, {:10}, {:10}, {:10}'
+        #header_string = header_string.format(
+        #                     'wlvac(nm)',
+        #                     'i',
+        #                     'j',
+        #                     'E_j (cm-1)',
+        #                     'Level j',
+        #                     'E_i (cm-1)'                                                          
+        #                     'Level i', 
+        #                     'Level i', 
+        #                     'pec cm^3/s',    
+        #                     'L (10^50 ph/s)',  
+        #                     'L (10^38 erg/s)'                   
+        #                     )
+
+        string = ' {:8.2f},     {:2} - {:2}, {:14.3f},  {:14}, {:14.3f}, {:10}, {:10.2E}, {:10.2E}, {:10.2E}, {:10.2E}'
+        #
+        f = open(file,'w')
+        ##if the user hasn't scaled the lumo yet:
+        if len(self.scaled_lumo_ergs) == 0:
+            print('scale_lumo_by_ion_mass() hasnt been called - scaling to unit solar mass')
+            self.scale_lumo_by_ion_mass(mass_of_ion_solar_units=1.0)
+
+        strings_to_be_printed = []
+
+        for ii in range(0,len(requested_lines)):
+            pec_ind = np.where(np.abs(self.wl_vac_nm - requested_lines[ii]) < wl_tol)
+
+            if len(pec_ind[0]) > 0:
+                if len(pec_ind[0]) > 1:
+                    print(72*'-')
+                    print('duplicate wavelength for requested lune at {} found - displaying all.'.format(requested_lines[ii]))
+                    print(72*'-')
+
+                for jj in range(0,len(pec_ind[0])):
+
+                    pec_ind_this = pec_ind[0][jj]
+                    lumo = self.scaled_lumo_photos[pec_ind_this]
+                    flux = self.scaled_lumo_ergs[pec_ind_this]
+                    upper = self.pec_levels[pec_ind_this][0]+1
+                    lower = self.pec_levels[pec_ind_this][1]+1
+                    
+                    upper_j   = self.angular_momenta[upper-1]
+                    lower_j   = self.angular_momenta[lower-1]
+                    upper_csf = self.csfs_labels[upper-1]+'{:5}'.format(upper_j)
+                    lower_csf = self.csfs_labels[lower-1]+'{:5}'.format(lower_j)
+
+                    if len(lower_csf) < 14:
+                        lower_csf = (14-len(lower_csf))*' ' + lower_csf
+                    if len(upper_csf) < 14:
+                        upper_csf = (14-len(upper_csf))*' ' + upper_csf
+
+                    upper_wav = self.energy_levels_cm[upper-1]
+                    lower_wav = self.energy_levels_cm[lower-1]
+                    avalue = self.avalues[upper-1,lower-1]
+                    wavel = self.wl_vac_nm[pec_ind_this]
+                    this_pec = self.pec[pec_ind_this][0]
+                    strings_to_be_printed.append(string.format(wavel,
+                                                               lower,
+                                                               upper,
+                                                               lower_wav,
+                                                               lower_csf,
+                                                               upper_wav,
+                                                               upper_csf,
+                                                               avalue,
+                                                               this_pec,
+                                                               lumo,
+                                                               flux))
+            else:
+                f.write("wavelength {:11.4f} not found - skipping\n".format(requested_lines[ii])) 
+        
+        
+        f.write(136*'-'+'\n')
+
+        f.write(header+'\n')
+        f.write(136*'-'+'\n')
+
+        for string in strings_to_be_printed:
+            f.write(string+'\n')
+        f.write(136*'-'+'\n')
+
+
     def line_broadening_lumo_density(self,velocity_frac_speed_light,wavelength_array,temperature,density):
         density_index = np.argmin(np.abs(self.density - density))
         temp_index = np.argmin(np.abs(self.temp - temperature))
