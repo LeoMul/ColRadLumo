@@ -29,6 +29,7 @@ class requested_lines:
     def __init__(
                  self,
                  wavelengths,
+                 wavelengths_air,
                  avalues,
                  pecs,
                  pec_levels,
@@ -40,7 +41,8 @@ class requested_lines:
                  mass=0.0,
                  temp=0.0,
                  dens=0.0,
-                 elementcode=''
+                 elementcode='',
+                 beta = 0.0
                  ):
 
         self.wl_vac_nm = wavelengths
@@ -55,20 +57,21 @@ class requested_lines:
         self.angular_momenta = angular_momenta
         self.energy_levels_cm = energies
         self.wl_value = []
+        self.wl_values_air = []
         self.temp = temp 
         self.mass = mass 
         self.dens = dens
         self.element_code = elementcode
 
-        self.header = 'wlvac(nm),  transition,     E_j (cm-1),         Level j,     E_i (cm-1),        Level i, A_ij(s^-1), pec cm^3/s,   L (ph/s),  L (erg/s)'
-        self.string_format = ' {:8.2f},     {:2} - {:2}, {:14.3f},  {:14}, {:14.3f}, {:10}, {:10.2E}, {:10.2E}, {:10.2E}, {:10.2E}'
+        self.header = 'wlvac(nm), wlair(nm),  transition,     E_j (cm-1),         Level j,     E_i (cm-1),        Level i, A_ij(s^-1), pec cm^3/s,   L (ph/s),  L (erg/s)'
+        self.string_format = ' {:12.4f}, {:12.4f},     {:2} - {:2}, {:14.3f},  {:14}, {:14.3f}, {:10}, {:10.2E}, {:10.2E}, {:10.2E}, {:10.2E}'
         
-        self.header_with_element_code = ' ElemCod, wlvac(nm),  transition,     E_j (cm-1),         Level j,     E_i (cm-1),        Level i, A_ij(s^-1), pec cm^3/s,   L (ph/s),  L (erg/s)'
-        self.string_format_with_element_code = '{:8}, {:8.2f},     {:2} - {:2}, {:14.3f},  {:14}, {:14.3f}, {:10}, {:10.2E}, {:10.2E}, {:10.2E}, {:10.2E}'
-        
-        
+        self.header_with_element_code = ' ElemCod, wlvac(nm), wlair(nm),  transition,     E_j (cm-1),         Level j,     E_i (cm-1),        Level i, A_ij(s^-1), pec cm^3/s,   L (ph/s),  L (erg/s)'
+        self.string_format_with_element_code = '{:8}, {:12.4f}, {:12.4f},     {:2} - {:2}, {:14.3f},  {:14}, {:14.3f}, {:10}, {:10.2E}, {:10.2E}, {:10.2E}, {:10.2E}'
         
         
+        if beta != 0:
+            self.string_format = self.string_format + ', {:8.2f}'
         self.rule = 136*'-'
         strings = [] 
         strings_with_codes = []
@@ -84,10 +87,10 @@ class requested_lines:
             upper_csf = self.csfs_labels[upper-1]+'{:5}'.format(upper_j)
             lower_csf = self.csfs_labels[lower-1]+'{:5}'.format(lower_j)
 
-            if len(lower_csf) < 14:
-                lower_csf = (14-len(lower_csf))*' ' + lower_csf
-            if len(upper_csf) < 14:
-                upper_csf = (14-len(upper_csf))*' ' + upper_csf
+            if len(lower_csf) < 16:
+                lower_csf = (16-len(lower_csf))*' ' + lower_csf
+            if len(upper_csf) < 16:
+                upper_csf = (16-len(upper_csf))*' ' + upper_csf
 
             self.labels.append(r'{} $\to$ {}'.format(upper_csf,lower_csf))
 
@@ -96,22 +99,43 @@ class requested_lines:
             avalue = self.avalues[upper-1,lower-1]
             wavel = self.wl_vac_nm[jj]
             self.wl_value.append(wavel)
+            self.wl_values_air.append(wavelengths_air[jj])
             this_pec = self.pec[jj]
-            strings.append(self.string_format.format(wavel,
-                                                     lower,
-                                                     upper,
-                                                     lower_wav,
-                                                     lower_csf,
-                                                     upper_wav,
-                                                     upper_csf,
-                                                     avalue,
-                                                     this_pec,
-                                                     lumo,
-                                                     flux
-                                                     )
-                                                     )
+            this_fwhm = 2.355 * beta * wavel / np.sqrt(2)
+            if beta == 0 :
+                strings.append(self.string_format.format(wavel,
+                                                        wavelengths_air[jj],
+                                                        lower,
+                                                        upper,
+                                                        lower_wav,
+                                                        lower_csf,
+                                                        upper_wav,
+                                                        upper_csf,
+                                                        avalue,
+                                                        this_pec,
+                                                        lumo,
+                                                        flux
+                                                        )
+                                                        )
+            else:
+                strings.append(self.string_format.format(wavel,
+                                                        wavelengths_air[jj],
+                                                        lower,
+                                                        upper,
+                                                        lower_wav,
+                                                        lower_csf,
+                                                        upper_wav,
+                                                        upper_csf,
+                                                        avalue,
+                                                        this_pec,
+                                                        lumo,
+                                                        flux,
+                                                        this_fwhm
+                                                        )
+                                                        )
             strings_with_codes.append(self.string_format_with_element_code.format(self.element_code,
                                                      wavel,
+                                                     wavelengths_air[jj],
                                                      lower,
                                                      upper,
                                                      lower_wav,
@@ -323,7 +347,7 @@ class colradlumo_calc:
             self.scaled_lumo_photos[:,:,:,ii] = self.luminosity_photons_per_solar_mass * mass_of_ion_solar_units[ii]
             self.scaled_lumo_ergs[:,:,:,ii] = self.luminosity_ergs_per_solar_mass * mass_of_ion_solar_units[ii]
 
-    def select_strongest_n_lines(self,n_select:int,temperature,density,mass) -> requested_lines:
+    def select_strongest_n_lines(self,n_select:int,temperature,density,mass,beta=0.0) -> requested_lines:
         #arguments for requested_lines_class
         #self,wavelengths,avalues,pecs,pec_levels,lumo_ph,lumo_erg,csf_labels,angular_momenta,energies
 
@@ -340,7 +364,9 @@ class colradlumo_calc:
         #print('Ne = {} cm-3'.format(self.density[density_index]))
         #print('M  = {} Msun'.format(self.mass[mass_index]))
         array_to_be_sorted = self.scaled_lumo_ergs[:,temp_index,density_index].flatten()
-        arguments = arguments[np.argsort(array_to_be_sorted[arguments])][::-1]
+        array_to_be_sorted = self.wl_air_nm[:].flatten()
+
+        arguments = arguments[np.argsort(array_to_be_sorted[arguments])]#[::-1]
         #if the user did not scale by a mass yet, just set it to one solar mass
         if len(self.scaled_lumo_ergs) == 0:
             print('scale_lumo_by_ion_mass() hasnt been called - scaling to unit solar mass')
@@ -351,6 +377,7 @@ class colradlumo_calc:
         element_code = self.colradpy_class.data['atomic']['element'].replace(' ', '')+str(self.colradpy_class.data['atomic']['charge_state'])+'+'
 
         requestlines = requested_lines(self.wl_vac_nm[arguments],
+                                       self.wl_air_nm[arguments],
                                        self.avalues,
                                        self.pec[arguments,temp_index,density_index].flatten(),
                                        self.pec_levels[arguments],
@@ -362,7 +389,8 @@ class colradlumo_calc:
                                        self.mass[mass_index],
                                        self.temp[temp_index],
                                        self.density[density_index],
-                                       element_code
+                                       element_code,
+                                       beta
                                        )
         return requestlines
 
@@ -637,14 +665,39 @@ class colradlumo_calc:
     def line_broadening_lumo_density(self,velocity_frac_speed_light,wavelength_array,temperature,density):
         density_index = np.argmin(np.abs(self.density - density))
         temp_index = np.argmin(np.abs(self.temp - temperature))
+        #print(density_index,temp_index)
         broadened_spec = np.zeros_like(wavelength_array) 
-        import math as m
         for (index,wavelength) in enumerate(self.wl_air_nm.flatten()):
+            #print(index)
             if (wavelength != 0.0) and (wavelength<1000*wavelength_array[-1]):
-                broadened_spec += self.escape_prob[index]*self.scaled_lumo_ergs[index,temp_index,density_index] * gaussian_kernel_lumo_density(wavelength,velocity_frac_speed_light,wavelength_array)
+                broadened_spec += self.scaled_lumo_ergs[index,temp_index,density_index] * gaussian_kernel_lumo_density(wavelength,velocity_frac_speed_light,wavelength_array)
                 #print(self.scaled_lumo_ergs[0],wavelength)
 
         return broadened_spec
+    
+    def line_broadening_lumo_density_fwhm(self,velocity_fwhm_cunits,wavelength_array,temperature,density):
+        density_index = np.argmin(np.abs(self.density - density))
+        temp_index = np.argmin(np.abs(self.temp - temperature))
+        #print(density_index,temp_index)
+        broadened_spec = np.zeros_like(wavelength_array) 
+        for (index,wavelength) in enumerate(self.wl_air_nm.flatten()):
+            #print(index)
+            if (wavelength != 0.0) and (wavelength<1000*wavelength_array[-1]):
+                broadened_spec += self.scaled_lumo_ergs[index,temp_index,density_index] * gaussian_kernel_lumo_density_new(wavelength,velocity_fwhm_cunits,wavelength_array)
+                #print(self.scaled_lumo_ergs[0],wavelength)
+
+        return broadened_spec
+
+def gaussian_kernel_lumo_density_new(central_wavelength_nm,beta_fwhm,wavelength_range_nm):
+    
+    lam_fwhm_nm = central_wavelength_nm * beta_fwhm
+    #convert to standard deviation.
+    lam_sigma_nm = lam_fwhm_nm/2.355
+    
+    expon = (central_wavelength_nm - wavelength_range_nm)/(lam_sigma_nm)
+    norm_factor = 1.0 / (SQRT_PI * lam_sigma_nm *10.0) #factor of ten to put in per angstrom.
+
+    return norm_factor * np.exp (-np.power(expon,2)*0.5) 
 
 def gaussian_kernel_lumo_density(central_wavelength_nm,beta,wavelength_range_nm):
     #returns a gaussian Luminosity density (in units of erg s^{-1} ang^{-1}) with unit luminosity.
