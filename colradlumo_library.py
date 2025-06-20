@@ -359,10 +359,10 @@ class colradlumo_calc:
         mass_index = np.argmin(np.abs(self.mass - mass))
         arguments =  np.argpartition(self.scaled_lumo_ergs[:,temp_index,density_index,mass_index].flatten(), -n_select)[-n_select:]
         #sorting from strongest to weakest of this subset
-        #print('Using parameters: ')
-        #print('Te = {} eV'.format(self.temp[temp_index]))
-        #print('Ne = {} cm-3'.format(self.density[density_index]))
-        #print('M  = {} Msun'.format(self.mass[mass_index]))
+        print('Using parameters: ')
+        print('Te = {} eV'.format(self.temp[temp_index]))
+        print('Ne = {} cm-3'.format(self.density[density_index]))
+        print('M  = {} Msun'.format(self.mass[mass_index]))
         array_to_be_sorted = self.scaled_lumo_ergs[:,temp_index,density_index].flatten()
         array_to_be_sorted = self.wl_air_nm[:].flatten()
 
@@ -417,7 +417,7 @@ class colradlumo_calc:
         num_ions = mass_solarunits * self.num_ions_in_a_solar_mass
         eps = 1.0 / (4.0 * np.pi)
 
-        header = 'wlvac(nm),  transition,     E_j (cm-1),         Level j,      Pop(j)     E_i (cm-1),        Level i,      Pop(j),  A_ij(s^-1),   SobDepth'
+        header = '      wlvac(nm),  transition,     E_j (cm-1),         Level j,      Pop(j)     E_i (cm-1),        Level i,      Pop(j),  A_ij(s^-1),   SobDepth'
 
 
         if printing:
@@ -451,7 +451,7 @@ class colradlumo_calc:
             factor = f_value * self.wl_vac_nm[ii] * 1e-7 * time_exp_cgs * populations[lower-1] * num_ions * correction / volume
             optical_depth[ii] *= factor
             optical_depth_test[ii] = (self.wl_air_nm[ii]*1e-7)**3 * eps*self.avalues[upper-1,lower-1] * 0.5 * populations[lower-1]*(self.statistical_weights[upper-1]/self.statistical_weights[lower-1] - populations[upper-1]/populations[lower-1])*time_exp_cgs *num_ions/volume
-            print(optical_depth[ii],optical_depth_test[ii])
+            #print(optical_depth[ii],optical_depth_test[ii])
             upper_j   = self.angular_momenta[upper-1]
             lower_j   = self.angular_momenta[lower-1]
             upper_csf = self.csfs_labels[upper-1]+'{:5}'.format(upper_j)
@@ -695,7 +695,7 @@ def gaussian_kernel_lumo_density_new(central_wavelength_nm,beta_fwhm,wavelength_
     lam_sigma_nm = lam_fwhm_nm/2.355
     
     expon = (central_wavelength_nm - wavelength_range_nm)/(lam_sigma_nm)
-    norm_factor = 1.0 / (SQRT_PI * lam_sigma_nm *10.0) #factor of ten to put in per angstrom.
+    norm_factor = 1.0 / (SQRT_TWOPI * lam_sigma_nm *10.0) #factor of ten to put in per angstrom.
 
     return norm_factor * np.exp (-np.power(expon,2)*0.5) 
 
