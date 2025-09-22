@@ -364,9 +364,10 @@ class colradlumo_calc:
         print('Ne = {} cm-3'.format(self.density[density_index]))
         print('M  = {} Msun'.format(self.mass[mass_index]))
         array_to_be_sorted = self.scaled_lumo_ergs[:,temp_index,density_index].flatten()
-        array_to_be_sorted = self.wl_air_nm[:].flatten()
+        
+        #array_to_be_sorted = self.wl_air_nm[:].flatten()
 
-        arguments = arguments[np.argsort(array_to_be_sorted[arguments])]#[::-1]
+        arguments = arguments[np.argsort(array_to_be_sorted[arguments])][::-1]
         #if the user did not scale by a mass yet, just set it to one solar mass
         if len(self.scaled_lumo_ergs) == 0:
             print('scale_lumo_by_ion_mass() hasnt been called - scaling to unit solar mass')
