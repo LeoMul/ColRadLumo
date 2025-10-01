@@ -200,15 +200,19 @@ def combine_requested_lines(list_of_requested_lines:list[requested_lines]) -> re
 
 
 class colradlumo_calc:
-    def __init__(self,adf04_path:str,density,temp,atomic_mass_number:float):
+    def __init__(self,adf04_path:str,
+                 density,
+                 temp,
+                 atomic_mass_number:float,
+                 use_Opacity=False):
 
 
         self.adf04_path = adf04_path
         self.density = density
         self.temp = temp 
-        #print(density)
         self.atomic_mass_number = atomic_mass_number
         self.atomic_mass_kg = atomic_mass_number * NUCLEON_MASS_KG
+
         met = np.array([0])#never change this unless you know what you're doing...
         #density = np.array([density])
         #temp = np.array([temp])
@@ -229,39 +233,39 @@ class colradlumo_calc:
         colradpy_run.suppliment_with_ecip()
         colradpy_run.populate_cr_matrix()
         colradpy_run.solve_quasi_static() 
-
         self.colradpy_class = colradpy_run
+        def normalisePops():
+            pec =  colradpy_run.data['processed']['pecs'][:,0,:,:]
+            pec[pec<0] = 0.0 #1e-30
+            pops = colradpy_run.data['processed']['pops_no_norm'][:,0,:,:]
+            #need to do a sum here over the right axis
+            sum_pops = 1.0 + np.sum(pops,axis=0)
 
+            self.sum_pops = sum_pops
+            self.pops_normed = pops / sum_pops
+            if not norm_pops_for_pecs:
+                #ground =1 , so not in array. add it on.
+                pec /= sum_pops
+                
+            self.pec = pec 
+            return 0
+
+        
+        
         self.pec_levels =  colradpy_run.data['processed']['pec_levels']
 
         t = process_time() - t 
         print('ColRadPy cpu time (sec) - {:7.2f}'.format(t))
         
-        pec =  colradpy_run.data['processed']['pecs'][:,0,:,:]
 
-        pec[pec<0] = 0.0 #1e-30
         #don't ever change this unless you want to give me a headache
         #if we didn't already normalise pops by the paritition function (which is the default option)
         #then do it.
         #I'm essentially overriding anywhere where the user can mess with the code.
-
+        normalisePops()
         
-        pops = colradpy_run.data['processed']['pops_no_norm'][:,0,:,:]
-        
-        #need to do a sum here over the right axis
-        sum_pops = 1.0 + np.sum(pops,axis=0)
-
-        self.sum_pops = sum_pops
-        self.pops_normed = pops / sum_pops
-        if not norm_pops_for_pecs:
-            #ground =1 , so not in array. add it on.
-            pec /= sum_pops
-
-
-
         wl_vac_nm = colradpy_run.data['processed']['wave_vac']
         wl_air_nm = colradpy_run.data['processed']['wave_air']
-        self.pec = pec 
         #print(pec[pec<0])
 
         self.wl_vac_nm  = wl_vac_nm 
@@ -276,14 +280,16 @@ class colradlumo_calc:
         num_ions_in_a_solar_mass = SOLAR_MASS_KG / self.atomic_mass_kg
 
         self.num_ions_in_a_solar_mass = num_ions_in_a_solar_mass
+        
 
+                
         lumo_per_ion = np.zeros([len(wl_air_nm),num_temps,num_dens])
         #print('dim check:')
         #print(np.shape(pec))
         #print(np.shape(lumo_per_ion))
 
         for ii in range(0,num_dens):
-            lumo_per_ion[:,:,ii] = pec[:,:,ii] * density[ii]
+            lumo_per_ion[:,:,ii] = self.pec[:,:,ii] * density[ii]
 
         lumo_per_ion = lumo_per_ion * num_ions_in_a_solar_mass
 
@@ -314,7 +320,63 @@ class colradlumo_calc:
 
         self.scaled_lumo_photos = [] 
         self.scaled_lumo_ergs = []
+        
+        aval_save = colradpy_run.data['rates']['a_val']
+        self.avalue_save = self.avalues
+        esc = 1.0
 
+        esc_estim1 = np.ones_like(colradpy_run.data['rates']['a_val'])
+        esc_estim2 = np.ones_like(colradpy_run.data['rates']['a_val'])
+
+        
+        
+        
+        damp = 0.1 
+        def opacityIteration():
+            self.optical_depth(temp[0],density[0],8.4,0.2,7.330e-04,printing=False)
+            esc2 = np.sum(self.escape_prob)
+            colradpy_run.data['rates']['a_val'] = aval_save * self.escape_prob
+            colradpy_run.populate_cr_matrix()
+            colradpy_run.solve_quasi_static() 
+            self.avalues = colradpy_run.data['cr_matrix']['A_ji']
+            normalisePops()
+            return esc2 
+        
+        if use_Opacity:
+            print('initiating opacity run')
+            for ii in range(0,3000):
+                #print(colradpy_run.data['processed']['pops'][-1],self.pops_normed[0])
+                self.optical_depth(temp[0],density[0],8.4,0.2,7.330e-04,printing=False)
+                form = 'Check: pop1 = {:8.4e}; aval = {:10.2e}; sobProb = {:8.4f}, sumSobProb= {:8.4f}'
+                #print('Check: ',self.pops_normed[0],colradpy_run.data['rates']['a_val'][0],np.sum(self.escape_prob))
+                print(form.format(
+                    self.pops_normed[9][0][0],
+                    colradpy_run.data['rates']['a_val'][9],
+                    self.escape_prob[9],
+                    np.sum(self.escape_prob)
+                ))
+                esc2 = np.sum(self.escape_prob)
+                
+                
+                colradpy_run.data['rates']['a_val'] = aval_save * self.escape_prob
+                
+                colradpy_run.populate_cr_matrix()
+                colradpy_run.solve_quasi_static() 
+                self.avalues = colradpy_run.data['cr_matrix']['A_ji']
+
+                normalisePops()
+                #if ( abs( esc/esc2 -1.0) < 1e-7 ):
+                #    break
+                esc = esc2
+                old_esc = self.escape_prob
+        
+
+                
+                
+        
+    
+
+                
     def predict_mass_for_requested_lumo_wl(self,wavelength_requested_nm,spectral_line_requested_ergs_s,temp,density):
         print('Requesting L = {:7.5E} ph/s for spectral line λ = {:11.4f} nm'.format(spectral_line_requested_ergs_s,wavelength_requested_nm) )
         
@@ -333,13 +395,14 @@ class colradlumo_calc:
 
 
     def scale_lumo_by_ion_mass(self,mass_of_ion_solar_units):
-
+        print(mass_of_ion_solar_units)
         self.scaled_lumo_photos = np.zeros([
             self.num_wl,
             self.num_temps,
             self.num_dens,
             len(mass_of_ion_solar_units)
         ])
+        print('hello',np.shape(self.scaled_lumo_photos))
         self.mass = mass_of_ion_solar_units
         self.scaled_lumo_ergs = self.scaled_lumo_photos.copy()
 
@@ -478,21 +541,25 @@ class colradlumo_calc:
                                                                optical_depth[ii],
                                                                (1.0 - np.exp(-optical_depth[ii])) / optical_depth[ii]
                                                         ))
-        print(header)
-        for ii in range(0,len(optical_depth)):
-                upper = self.pec_levels[ii][0]
-                lower = self.pec_levels[ii][1]
-                print('{:6}'.format(ion_string),strings[ii])
-
-                #if ii ==0 :
-                #    #print(fvalue_array[ii])
-                #if self.avalues[upper,lower] > 1e4:
-                ##print(lower,populations[lower-1])
-                #    #print(fvalue_array[ii])
-                #    print('{:6}'.format(ion_string),strings[ii])
-                #    break
         self.escape_prob = (1.0 - np.exp(-optical_depth)) / optical_depth
+        ttt = np.argwhere(optical_depth == 0)
+        self.escape_prob[ttt] = 1.0
         self.sobolov = optical_depth
+
+        if printing:
+            print(header)
+            for ii in range(0,len(optical_depth)):
+                    upper = self.pec_levels[ii][0]
+                    lower = self.pec_levels[ii][1]
+                    print('{:6}'.format(ion_string),strings[ii])
+
+                    #if ii ==0 :
+                    #    #print(fvalue_array[ii])
+                    #if self.avalues[upper,lower] > 1e4:
+                    ##print(lower,populations[lower-1])
+                    #    #print(fvalue_array[ii])
+                    #    print('{:6}'.format(ion_string),strings[ii])
+                    #    break
 
     #def display_requested_lines_array(self,requested_lines:float,wl_tol:float):
     #    header = 'wlvac(nm),  transition,     E_j (cm-1),         Level j,     E_i (cm-1),        Level i, A_ij(s^-1), pec cm^3/s,   L (ph/s),  L (erg/s)'
@@ -663,15 +730,16 @@ class colradlumo_calc:
     #    f.write(136*'-'+'\n')
 
 
-    def line_broadening_lumo_density(self,velocity_frac_speed_light,wavelength_array,temperature,density):
+    def line_broadening_lumo_density(self,velocity_frac_speed_light,wavelength_array,temperature,density,mass):
         density_index = np.argmin(np.abs(self.density - density))
         temp_index = np.argmin(np.abs(self.temp - temperature))
+        mass_index = np.argmin(np.abs(self.mass - mass))
         #print(density_index,temp_index)
         broadened_spec = np.zeros_like(wavelength_array) 
         for (index,wavelength) in enumerate(self.wl_air_nm.flatten()):
             #print(index)
             if (wavelength != 0.0) and (wavelength<1000*wavelength_array[-1]):
-                broadened_spec += self.scaled_lumo_ergs[index,temp_index,density_index] * gaussian_kernel_lumo_density(wavelength,velocity_frac_speed_light,wavelength_array)
+                broadened_spec += self.scaled_lumo_ergs[index,temp_index,density_index,mass_index] * gaussian_kernel_lumo_density(wavelength,velocity_frac_speed_light,wavelength_array)
                 #print(self.scaled_lumo_ergs[0],wavelength)
 
         return broadened_spec
