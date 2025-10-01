@@ -25,6 +25,9 @@ SOBOLEV_CONST = np.pi * ELECTRIC_CHARGE_CGS_ESU * ELECTRIC_CHARGE_CGS_ESU\
 
 OSCILLATOR_CONST = 6.6702E15
 
+MAX_OPACITY_ITER = 200 
+
+
 class requested_lines:
     def __init__(
                  self,
@@ -221,7 +224,7 @@ class colradlumo_calc:
         #this is the default option, i 
         #just coded it this way as a failsafe.
         norm_pops_for_pecs = False
-
+        self.norm_pops_for_pecs = norm_pops_for_pecs
         num_temps = len(temp)
         num_dens = len(density)
         
@@ -233,22 +236,10 @@ class colradlumo_calc:
         colradpy_run.suppliment_with_ecip()
         colradpy_run.populate_cr_matrix()
         colradpy_run.solve_quasi_static() 
-        self.colradpy_class = colradpy_run
-        def normalisePops():
-            pec =  colradpy_run.data['processed']['pecs'][:,0,:,:]
-            pec[pec<0] = 0.0 #1e-30
-            pops = colradpy_run.data['processed']['pops_no_norm'][:,0,:,:]
-            #need to do a sum here over the right axis
-            sum_pops = 1.0 + np.sum(pops,axis=0)
-
-            self.sum_pops = sum_pops
-            self.pops_normed = pops / sum_pops
-            if not norm_pops_for_pecs:
-                #ground =1 , so not in array. add it on.
-                pec /= sum_pops
-                
-            self.pec = pec 
-            return 0
+        
+        #is this redundant? refactor necessary.
+        #self.colradpy_class = colradpy_run
+        self.colradpy_run = colradpy_run
 
         
         
@@ -262,7 +253,7 @@ class colradlumo_calc:
         #if we didn't already normalise pops by the paritition function (which is the default option)
         #then do it.
         #I'm essentially overriding anywhere where the user can mess with the code.
-        normalisePops()
+        self.normalisePops()
         
         wl_vac_nm = colradpy_run.data['processed']['wave_vac']
         wl_air_nm = colradpy_run.data['processed']['wave_air']
@@ -280,31 +271,11 @@ class colradlumo_calc:
         num_ions_in_a_solar_mass = SOLAR_MASS_KG / self.atomic_mass_kg
 
         self.num_ions_in_a_solar_mass = num_ions_in_a_solar_mass
-        
-
-                
-        lumo_per_ion = np.zeros([len(wl_air_nm),num_temps,num_dens])
-        #print('dim check:')
-        #print(np.shape(pec))
-        #print(np.shape(lumo_per_ion))
-
-        for ii in range(0,num_dens):
-            lumo_per_ion[:,:,ii] = self.pec[:,:,ii] * density[ii]
-
-        lumo_per_ion = lumo_per_ion * num_ions_in_a_solar_mass
-
-
-        #we already normalised the pec
-        self.luminosity_photons_per_solar_mass = lumo_per_ion.copy()
-
         #CONVERT  NM TO CM
         self.photon_energies_ergs = HC_CGS / (wl_vac_nm*1e-7) #.flatten()
-        self.luminosity_ergs_per_solar_mass = self.luminosity_photons_per_solar_mass.copy()
 
-        print(np.shape(self.photon_energies_ergs))
-        print(self.photon_energies_ergs[0])
-        for ii in range(0,len(wl_air_nm)):
-            self.luminosity_ergs_per_solar_mass[ii,:,:] = self.luminosity_photons_per_solar_mass[ii,:,:] * self.photon_energies_ergs[ii]
+
+        self.init_lumo()        
 
         #atomic data
         self.avalues = colradpy_run.data['cr_matrix']['A_ji']
@@ -322,97 +293,134 @@ class colradlumo_calc:
         self.scaled_lumo_ergs = []
         
         aval_save = colradpy_run.data['rates']['a_val']
+        self.aval_save = aval_save
         self.avalue_save = self.avalues
+        
         self.converged = False
-        esc = 1.0
         self.suma_old = np.sum(aval_save)
         self.suma_new = 0.0
-        esc_estim1 = np.ones_like(colradpy_run.data['rates']['a_val'])
-        esc_estim2 = np.ones_like(colradpy_run.data['rates']['a_val'])
 
         
         
         
-        damp = 0.1 
         iter = 0 
-        tracker  = np.zeros(4)
+        self.tracker  = np.zeros(4)
         self.esc_old = np.ones_like(aval_save)
         
-        def opacityIteration():
-            self.optical_depth(temp[0],density[0],8.4,0.2,7.330e-04,printing=False)
-            
-            colradpy_run.data['rates']['a_val'] = aval_save * self.escape_prob
-            
-            colradpy_run.populate_cr_matrix()
-            colradpy_run.solve_quasi_static() 
-            normalisePops()
-            self.avalues = colradpy_run.data['cr_matrix']['A_ji']
-            sumavalues = np.sum(self.avalues)
-            self.suma_new = sumavalues
-            print('{:5}, {:10.2e}'.format(iter,np.sum(self.avalues)))
-            
-            tracker[iter%4] = sumavalues
-            
-            if ((iter%4 ==0) and iter > 0):
-                t1 = tracker[0] + tracker[1]
-                t2 = tracker[2] + tracker[3]
-                print('{:10.2e} {:10.2e}'.format(t1,t2))
-                if (abs(t1/t2 -1.0) < 0.01):
-                    print('calling epic accelerator')
-                    avg = 0.5 * self.escape_prob + 0.5 * self.esc_old  
-                    colradpy_run.data['rates']['a_val'] = aval_save * avg
-                    colradpy_run.populate_cr_matrix()
-                    colradpy_run.solve_quasi_static() 
-                    self.avalues = colradpy_run.data['cr_matrix']['A_ji']                    
-                    normalisePops()
+                
 
-            
-            #print(esc2)
-            
-            
-            self.esc_old = self.escape_prob
-            
-            if ( abs( self.suma_old / self.suma_new -1.0) < 0.001):
-                self.converged = True
-            self.suma_old = self.suma_new
-
-            return self.pops_normed 
+    def init_lumo(self):
         
-        if use_Opacity:
-            print('initiating opacity run')
-            p1 = self.pops_normed
-            
-            p2 = opacityIteration()
-            
-            p3 = opacityIteration()
-            
-            f1 = p2 - p1  
-            f2 = p3 - p2  
-            
-            for ii in range(0,200):
-                iter+=1
-                p4 = p3 - f2 * (p3-p2) / (f2 - f1)
-                #print('p4 = ',p4[5])
+        lumo_per_ion = np.zeros([len(self.wl_air_nm),self.num_temps,self.num_dens])
+        print('INIT LUMO',self.pec[0,0,0])
+        for ii in range(0,self.num_dens):
+            lumo_per_ion[:,:,ii] = self.pec[:,:,ii] * self.density[ii]
+        lumo_per_ion = lumo_per_ion * self.num_ions_in_a_solar_mass
 
-                f1 = f2 
-                p2 = p3 
-                p3 = opacityIteration()
-                f2 = p3 - p2
-                if self.converged:
-                    print('exiting iterator at iteration ',ii)
-                    break 
-                
-                
-            
-            
-            #for ii in range(0,300):
-                
-                
 
-                
-                
+        #we already normalised the pec
+        self.luminosity_photons_per_solar_mass = lumo_per_ion.copy()
+        self.luminosity_ergs_per_solar_mass = self.luminosity_photons_per_solar_mass.copy()
+
+        for ii in range(0,len(self.wl_air_nm)):
+            self.luminosity_ergs_per_solar_mass[ii,:,:] = self.luminosity_photons_per_solar_mass[ii,:,:] * self.photon_energies_ergs[ii]
+
+            
+    def normalisePops(self):
+        pec =  self.colradpy_run.data['processed']['pecs'][:,0,:,:]
+        pec[pec<0] = 0.0 #1e-30
         
-    
+        pops = self.colradpy_run.data['processed']['pops_no_norm'][:,0,:,:]
+        #need to do a sum here over the right axis
+        sum_pops = 1.0 + np.sum(pops,axis=0)
+        self.sum_pops = sum_pops
+        self.pops_normed = pops / sum_pops
+        if not self.norm_pops_for_pecs:
+            #ground =1 , so not in array. add it on.
+            pec /= sum_pops
+            
+        self.pec = pec 
+        print('check lpm',pec[0,0,0])
+                
+    def convergeOpacity(self,
+                        desired_temp,
+                        desired_density,
+                        time_exp_days,
+                        velocity_c,
+                        mass_solar):
+
+        for ii in range(0,MAX_OPACITY_ITER):
+            
+            self.opacityIteration(
+                         desired_temp,
+                         desired_density,
+                         time_exp_days,
+                         velocity_c,
+                         mass_solar,
+                         ii
+                         )
+
+            if self.converged:
+                print('exiting at iteration ',ii)
+                break
+        
+        if (ii == MAX_OPACITY_ITER):
+            print('warning - opacity calculation may not be converged.')
+        self.init_lumo()
+        print(self.pec[2,0,0],self.wl_vac_nm[2])
+        
+    def opacityIteration(self,
+                         desired_temp,
+                         desired_density,
+                         time_exp_days,
+                         velocity_c,
+                         mass_solar,
+                         iter
+                         ):
+        
+        self.optical_depth(desired_temp,
+                           desired_density,
+                           time_exp_days,
+                           velocity_c,
+                           mass_solar,
+                           printing=False)
+        
+        self.colradpy_run.data['rates']['a_val'] = self.aval_save * self.escape_prob
+        
+        self.colradpy_run.populate_cr_matrix()
+        self.colradpy_run.solve_quasi_static() 
+        self.normalisePops()
+        self.avalues = self.colradpy_run.data['cr_matrix']['A_ji']
+        sumavalues = np.sum(self.avalues)
+        self.suma_new = sumavalues
+        print('{:5}, {:10.2e}'.format(iter,np.sum(self.avalues)))
+        
+        tracker = self.tracker
+        tracker[iter%4] = sumavalues
+        
+        if ((iter%4 ==0) and iter > 0):
+            t1 = tracker[0] + tracker[1]
+            t2 = tracker[2] + tracker[3]
+            print('{:10.2e} {:10.2e}'.format(t1,t2))
+            if (abs(t1/t2 -1.0) < 0.01):
+                print('calling epic accelerator')
+                avg = 0.5 * self.escape_prob + 0.5 * self.esc_old  
+                self.colradpy_run.data['rates']['a_val'] = self.aval_save * avg
+                self.colradpy_run.populate_cr_matrix()
+                self.colradpy_run.solve_quasi_static() 
+                self.avalues = self.colradpy_run.data['cr_matrix']['A_ji']                    
+                self.normalisePops()
+        
+        #print(esc2)
+        
+        
+        self.esc_old = self.escape_prob
+        
+        if ( abs( self.suma_old / self.suma_new -1.0) < 0.001):
+            self.converged = True
+        self.suma_old = self.suma_new
+
+        return 0
 
                 
     def predict_mass_for_requested_lumo_wl(self,wavelength_requested_nm,spectral_line_requested_ergs_s,temp,density):
@@ -476,7 +484,7 @@ class colradlumo_calc:
 
         #putting all this in the class. 
 
-        element_code = self.colradpy_class.data['atomic']['element'].replace(' ', '')+str(self.colradpy_class.data['atomic']['charge_state'])+'+'
+        element_code = self.colradpy_run.data['atomic']['element'].replace(' ', '')+str(self.colradpy_run.data['atomic']['charge_state'])+'+'
 
         requestlines = requested_lines(self.wl_vac_nm[arguments],
                                        self.wl_air_nm[arguments],
@@ -506,7 +514,7 @@ class colradlumo_calc:
         populations = np.zeros(len(self.pops_normed[:,temp_index,density_index])+1)
 
         #ColRadPy's pops_no_norm as ground=1 and not included in the arry, include this and normalise.
-        populations[1:] = self.colradpy_class.data['processed']['pops_no_norm'][:,0,temp_index,density_index]#self.pops_normed[:,temp_index,density_index]
+        populations[1:] = self.colradpy_run.data['processed']['pops_no_norm'][:,0,temp_index,density_index]#self.pops_normed[:,temp_index,density_index]
         populations[0] = 1.0 #/ self.sum_pops[temp_index,density_index]
         populations/= np.sum(populations)
         
