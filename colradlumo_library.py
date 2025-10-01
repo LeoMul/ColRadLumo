@@ -47,7 +47,7 @@ class requested_lines:
                  elementcode='',
                  beta = 0.0
                  ):
-
+        self. avalue_sum_check = np.inf
         self.wl_vac_nm = wavelengths
         self.avalues     = avalues
 
@@ -274,7 +274,7 @@ class colradlumo_calc:
         #CONVERT  NM TO CM
         self.photon_energies_ergs = HC_CGS / (wl_vac_nm*1e-7) #.flatten()
 
-
+        self.pdiff=0.0
         self.init_lumo()        
 
         #atomic data
@@ -312,7 +312,7 @@ class colradlumo_calc:
     def init_lumo(self):
         
         lumo_per_ion = np.zeros([len(self.wl_air_nm),self.num_temps,self.num_dens])
-        print('INIT LUMO',self.pec[0,0,0])
+        #print('INIT LUMO',self.pec[0,0,0])
         for ii in range(0,self.num_dens):
             lumo_per_ion[:,:,ii] = self.pec[:,:,ii] * self.density[ii]
         lumo_per_ion = lumo_per_ion * self.num_ions_in_a_solar_mass
@@ -340,14 +340,16 @@ class colradlumo_calc:
             pec /= sum_pops
             
         self.pec = pec 
-        print('check lpm',pec[0,0,0])
+        #print('check lpm',pec[0,0,0])
                 
     def convergeOpacity(self,
                         desired_temp,
                         desired_density,
                         time_exp_days,
                         velocity_c,
-                        mass_solar):
+                        mass_solar,
+                        oscillator_breaker=False,
+                        debug_printing = False):
 
         for ii in range(0,MAX_OPACITY_ITER):
             
@@ -357,17 +359,21 @@ class colradlumo_calc:
                          time_exp_days,
                          velocity_c,
                          mass_solar,
-                         ii
+                         ii,
+                         oscillator_breaker,
+                         debug_printing
                          )
 
             if self.converged:
-                print('exiting at iteration ',ii)
+                print('Exiting  opacity self consitency run at iteration {:3}.'.format(ii))
+                print('Population diff: {:8.2e}'.format(self.pdiff))
+                print('Avalue diff: {:8.2e}'.format(self.avalue_sum_check))
+
                 break
         
-        if (ii == MAX_OPACITY_ITER):
+        if (ii == MAX_OPACITY_ITER-1):
             print('warning - opacity calculation may not be converged.')
         self.init_lumo()
-        print(self.pec[2,0,0],self.wl_vac_nm[2])
         
     def opacityIteration(self,
                          desired_temp,
@@ -375,7 +381,9 @@ class colradlumo_calc:
                          time_exp_days,
                          velocity_c,
                          mass_solar,
-                         iter
+                         iter,
+                         oscillator_breaker,
+                         debug_printing = False
                          ):
         
         self.optical_depth(desired_temp,
@@ -386,37 +394,51 @@ class colradlumo_calc:
                            printing=False)
         
         self.colradpy_run.data['rates']['a_val'] = self.aval_save * self.escape_prob
-        
+        p1 = self.pops_normed
+
         self.colradpy_run.populate_cr_matrix()
         self.colradpy_run.solve_quasi_static() 
+        
         self.normalisePops()
+        
+        p2 = self.pops_normed 
+        self.pdiff = np.sum(np.power(p1-p2,2))
+        
         self.avalues = self.colradpy_run.data['cr_matrix']['A_ji']
         sumavalues = np.sum(self.avalues)
         self.suma_new = sumavalues
-        print('{:5}, {:10.2e}'.format(iter,np.sum(self.avalues)))
+        if debug_printing:
+            print('population check: ',self.pdiff)
+            print('{:5}, {:10.2e}'.format(iter,np.sum(self.avalues)))
         
         tracker = self.tracker
         tracker[iter%4] = sumavalues
         
-        if ((iter%4 ==0) and iter > 0):
+        num_oscillations = 0
+        warned = False
+        if ( (iter%4 ==0) and iter > 0):
             t1 = tracker[0] + tracker[1]
             t2 = tracker[2] + tracker[3]
-            print('{:10.2e} {:10.2e}'.format(t1,t2))
             if (abs(t1/t2 -1.0) < 0.01):
-                print('calling epic accelerator')
-                avg = 0.5 * self.escape_prob + 0.5 * self.esc_old  
-                self.colradpy_run.data['rates']['a_val'] = self.aval_save * avg
-                self.colradpy_run.populate_cr_matrix()
-                self.colradpy_run.solve_quasi_static() 
-                self.avalues = self.colradpy_run.data['cr_matrix']['A_ji']                    
-                self.normalisePops()
-        
-        #print(esc2)
-        
-        
+                num_oscillations += 1
+                if oscillator_breaker:
+                    
+                    if debug_printing:
+                        print('calling epic accelerator, oscl detectected: {:10.2e} {:10.2e}'.format(t1,t2))
+                        
+                    avg = 0.5 * self.escape_prob + 0.5 * self.esc_old  
+                    self.colradpy_run.data['rates']['a_val'] = self.aval_save * avg
+                    self.colradpy_run.populate_cr_matrix()
+                    self.colradpy_run.solve_quasi_static() 
+                    self.avalues = self.colradpy_run.data['cr_matrix']['A_ji']                    
+                    self.normalisePops()
+                elif ( (num_oscillations > 4) and (not warned) ) : 
+                    print('Oscillations detected, recommend running with accelerator.')
+                    warned = True
+                        
         self.esc_old = self.escape_prob
-        
-        if ( abs( self.suma_old / self.suma_new -1.0) < 0.001):
+        self.avalue_sum_check = abs( self.suma_old / self.suma_new -1.0)
+        if ( self.avalue_sum_check < 0.001):
             self.converged = True
         self.suma_old = self.suma_new
 
@@ -441,14 +463,14 @@ class colradlumo_calc:
 
 
     def scale_lumo_by_ion_mass(self,mass_of_ion_solar_units):
-        print(mass_of_ion_solar_units)
+        #print(mass_of_ion_solar_units)
         self.scaled_lumo_photos = np.zeros([
             self.num_wl,
             self.num_temps,
             self.num_dens,
             len(mass_of_ion_solar_units)
         ])
-        print('hello',np.shape(self.scaled_lumo_photos))
+        #print('hello',np.shape(self.scaled_lumo_photos))
         self.mass = mass_of_ion_solar_units
         self.scaled_lumo_ergs = self.scaled_lumo_photos.copy()
 
@@ -542,6 +564,10 @@ class colradlumo_calc:
         strings = []
         string_format = ' {:8.2f},     {:2} - {:2}, {:14.3f},  {:14}, {:10.2E}, {:14.3f}, {:10}, {:10.2E}, {:10.2E}, {:10.2E}, {:10.2E}'
         #print(header)
+        self.escape_prob = np.ones_like(optical_depth)
+        #ttt = np.argwhere(optical_depth > 1e-7)
+        #self.escape_prob[ttt] = (1.0 - np.exp(-optical_depth[ttt])) / optical_depth[ttt]
+        
         for ii in range(0, num_lines):
             
             upper = self.pec_levels[ii][0]+1
@@ -573,6 +599,11 @@ class colradlumo_calc:
             upper_wav = self.energy_levels_cm[upper-1]
             lower_wav = self.energy_levels_cm[lower-1]
             wavel = self.wl_vac_nm[ii]
+            
+            if optical_depth[ii] > 1e-7:
+                self.escape_prob[ii] = (1.0 - np.exp(-optical_depth[ii])) / optical_depth[ii]
+
+            
 
             strings.append(string_format.format(          wavel,
                                                                lower,
@@ -585,11 +616,10 @@ class colradlumo_calc:
                                                                populations[upper-1],
                                                                self.avalues[upper-1,lower-1],
                                                                optical_depth[ii],
-                                                               (1.0 - np.exp(-optical_depth[ii])) / optical_depth[ii]
+                                                               self.escape_prob[ii]
                                                         ))
-        self.escape_prob = (1.0 - np.exp(-optical_depth)) / optical_depth
-        ttt = np.argwhere(optical_depth == 0)
-        self.escape_prob[ttt] = 1.0
+            
+
         self.sobolov = optical_depth
 
         if printing:
