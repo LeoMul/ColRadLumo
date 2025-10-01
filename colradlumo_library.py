@@ -323,8 +323,10 @@ class colradlumo_calc:
         
         aval_save = colradpy_run.data['rates']['a_val']
         self.avalue_save = self.avalues
+        self.converged = False
         esc = 1.0
-
+        self.suma_old = np.sum(aval_save)
+        self.suma_new = 0.0
         esc_estim1 = np.ones_like(colradpy_run.data['rates']['a_val'])
         esc_estim2 = np.ones_like(colradpy_run.data['rates']['a_val'])
 
@@ -332,44 +334,80 @@ class colradlumo_calc:
         
         
         damp = 0.1 
+        iter = 0 
+        tracker  = np.zeros(4)
+        self.esc_old = np.ones_like(aval_save)
+        
         def opacityIteration():
             self.optical_depth(temp[0],density[0],8.4,0.2,7.330e-04,printing=False)
-            esc2 = np.sum(self.escape_prob)
+            
             colradpy_run.data['rates']['a_val'] = aval_save * self.escape_prob
+            
             colradpy_run.populate_cr_matrix()
             colradpy_run.solve_quasi_static() 
-            self.avalues = colradpy_run.data['cr_matrix']['A_ji']
             normalisePops()
-            return esc2 
+            self.avalues = colradpy_run.data['cr_matrix']['A_ji']
+            sumavalues = np.sum(self.avalues)
+            self.suma_new = sumavalues
+            print('{:5}, {:10.2e}'.format(iter,np.sum(self.avalues)))
+            
+            tracker[iter%4] = sumavalues
+            
+            if ((iter%4 ==0) and iter > 0):
+                t1 = tracker[0] + tracker[1]
+                t2 = tracker[2] + tracker[3]
+                print('{:10.2e} {:10.2e}'.format(t1,t2))
+                if (abs(t1/t2 -1.0) < 0.01):
+                    print('calling epic accelerator')
+                    avg = 0.5 * self.escape_prob + 0.5 * self.esc_old  
+                    colradpy_run.data['rates']['a_val'] = aval_save * avg
+                    colradpy_run.populate_cr_matrix()
+                    colradpy_run.solve_quasi_static() 
+                    self.avalues = colradpy_run.data['cr_matrix']['A_ji']                    
+                    normalisePops()
+
+            
+            #print(esc2)
+            
+            
+            self.esc_old = self.escape_prob
+            
+            if ( abs( self.suma_old / self.suma_new -1.0) < 0.001):
+                self.converged = True
+            self.suma_old = self.suma_new
+
+            return self.pops_normed 
         
         if use_Opacity:
             print('initiating opacity run')
-            for ii in range(0,3000):
-                #print(colradpy_run.data['processed']['pops'][-1],self.pops_normed[0])
-                self.optical_depth(temp[0],density[0],8.4,0.2,7.330e-04,printing=False)
-                form = 'Check: pop1 = {:8.4e}; aval = {:10.2e}; sobProb = {:8.4f}, sumSobProb= {:8.4f}'
-                #print('Check: ',self.pops_normed[0],colradpy_run.data['rates']['a_val'][0],np.sum(self.escape_prob))
-                print(form.format(
-                    self.pops_normed[9][0][0],
-                    colradpy_run.data['rates']['a_val'][9],
-                    self.escape_prob[9],
-                    np.sum(self.escape_prob)
-                ))
-                esc2 = np.sum(self.escape_prob)
-                
-                
-                colradpy_run.data['rates']['a_val'] = aval_save * self.escape_prob
-                
-                colradpy_run.populate_cr_matrix()
-                colradpy_run.solve_quasi_static() 
-                self.avalues = colradpy_run.data['cr_matrix']['A_ji']
+            p1 = self.pops_normed
+            
+            p2 = opacityIteration()
+            
+            p3 = opacityIteration()
+            
+            f1 = p2 - p1  
+            f2 = p3 - p2  
+            
+            for ii in range(0,200):
+                iter+=1
+                p4 = p3 - f2 * (p3-p2) / (f2 - f1)
+                #print('p4 = ',p4[5])
 
-                normalisePops()
-                #if ( abs( esc/esc2 -1.0) < 1e-7 ):
-                #    break
-                esc = esc2
-                old_esc = self.escape_prob
-        
+                f1 = f2 
+                p2 = p3 
+                p3 = opacityIteration()
+                f2 = p3 - p2
+                if self.converged:
+                    print('exiting iterator at iteration ',ii)
+                    break 
+                
+                
+            
+            
+            #for ii in range(0,300):
+                
+                
 
                 
                 
