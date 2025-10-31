@@ -650,7 +650,7 @@ class colradlumo_calc:
 
             
             
-            factor = f_value * self.wl_vac_ang_matrix[upper-1,lower-1] * 1e-7 * time_exp_cgs * ion_density
+            factor = f_value * self.wl_vac_ang_matrix[upper-1,lower-1] * 1e-8 * time_exp_cgs * ion_density
             
             
             optical_depth[ii] *= factor
