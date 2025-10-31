@@ -1,6 +1,7 @@
 path_to_colradpy = 'ColRadPy/'
 import sys
 sys.path.append(path_to_colradpy)
+from atomic_masses import amu,elements,getAtomicNumber
 
 from colradpy import colradpy 
 from time import process_time 
@@ -9,9 +10,9 @@ import numpy as np
 
 #masses
 NUCLEON_MASS_KG = 1.67493e-27
-SOLAR_MASS_KG = 1.989e+30 
-SQRT_TWOPI = 2.5066282746310002
-SQRT_PI = 1.7724538509055159
+SOLAR_MASS_KG   = 1.989e+30 
+SQRT_TWOPI      = 2.5066282746310002
+SQRT_PI         = 1.7724538509055159
 
 #Planck's constant times c in cgs e.g: erg cm s 
 HC_CGS = 6.63e-34 * 3e8 * 1e7 * 1e2
@@ -206,16 +207,28 @@ class colradlumo_calc:
     def __init__(self,adf04_path:str,
                  density,
                  temp,
-                 atomic_mass_number:float,
+                 atomic_mass_number:float = 0.0,
                  use_Opacity=False):
 
 
         self.adf04_path = adf04_path
         self.density = density
         self.temp = temp 
-        self.atomic_mass_number = atomic_mass_number
-        self.atomic_mass_kg = atomic_mass_number * NUCLEON_MASS_KG
+        self.getElementCode()
+        
+        atomic_number = getAtomicNumber(self.element)
+        print(atomic_number)
+        
+        if atomic_mass_number == 0.0:
+            self.atomic_mass_number = amu[atomic_number]
+            atomic_mass_number = amu[atomic_number]
+            print(atomic_number,self.atomic_mass_number)
+        else:
+            self.atomic_mass_number = atomic_mass_number
+            
+        self.atomic_mass_kg = self.atomic_mass_number * NUCLEON_MASS_KG
 
+        
         met = np.array([0])#never change this unless you know what you're doing...
         #density = np.array([density])
         #temp = np.array([temp])
@@ -279,8 +292,18 @@ class colradlumo_calc:
 
         #atomic data
         self.avalues = colradpy_run.data['cr_matrix']['A_ji']
-
+        #print('check: ',np.shape(self.avalues))
         self.energy_levels_cm = colradpy_run.data['atomic']['energy']
+        
+        self.wl_vac_ang_matrix = np.zeros_like(self.avalues)
+        nlev = len(self.energy_levels_cm)
+        for ii in range(0,nlev):
+            for jj in range(0,nlev):
+                if (ii != jj):
+                    self.wl_vac_ang_matrix[ii,jj] =abs ( 1e8 / (self.energy_levels_cm[ii] - self.energy_levels_cm[jj]))
+        
+        
+        
         self.csfs_labels = colradpy_run.data['atomic']['config']
         #self.terms = colradpy_run.data['atomic']['nist_conf_form']
         self.angular_momenta = colradpy_run.data['atomic']['w']
@@ -294,7 +317,7 @@ class colradlumo_calc:
         
         aval_save = colradpy_run.data['rates']['a_val']
         self.aval_save = aval_save
-        self.avalue_save = self.avalues
+        self.avalue_save = self.avalues.copy()
         
         self.converged = False
         self.suma_old = np.sum(aval_save)
@@ -310,7 +333,7 @@ class colradlumo_calc:
                 
 
     def init_lumo(self):
-        
+        print(self.pec[1382])
         lumo_per_ion = np.zeros([len(self.wl_air_nm),self.num_temps,self.num_dens])
         #print('INIT LUMO',self.pec[0,0,0])
         for ii in range(0,self.num_dens):
@@ -325,7 +348,30 @@ class colradlumo_calc:
         for ii in range(0,len(self.wl_air_nm)):
             self.luminosity_ergs_per_solar_mass[ii,:,:] = self.luminosity_photons_per_solar_mass[ii,:,:] * self.photon_energies_ergs[ii]
 
-            
+    def getElementCode(self):
+        #gets elements from the adf04 file
+        try:
+            f = open(self.adf04_path,'r')
+            firstLine = f.readline()
+            f.close()
+
+            #print(firstLine)
+
+            #firstLine = firstLine.replace(' ','')
+
+            element = firstLine[0:2]
+            charge  = firstLine[3:5]
+
+            self.element = element
+            self.charge_plus  = int(charge)
+            self.charge_roman = int_to_roman(int(charge)+1)
+            print(element,self.charge_roman)
+
+        except:
+            print('failed to get element code - debug please :)')
+        
+
+
     def normalisePops(self):
         pec =  self.colradpy_run.data['processed']['pecs'][:,0,:,:]
         pec[pec<0] = 0.0 #1e-30
@@ -349,7 +395,8 @@ class colradlumo_calc:
                         velocity_c,
                         mass_solar,
                         oscillator_breaker=False,
-                        debug_printing = False):
+                        debug_printing = False,
+                        fraction_override = 0.0):
 
         for ii in range(0,MAX_OPACITY_ITER):
             
@@ -361,7 +408,8 @@ class colradlumo_calc:
                          mass_solar,
                          ii,
                          oscillator_breaker,
-                         debug_printing
+                         debug_printing,
+                         fraction_override
                          )
 
             if self.converged:
@@ -372,7 +420,7 @@ class colradlumo_calc:
                 break
         
         if (ii == MAX_OPACITY_ITER-1):
-            print('warning - opacity calculation may not be converged.')
+            print('warning - opacity calculation may not be converged for {} {}'.format(self.element,self.charge_roman))
         self.init_lumo()
         
     def opacityIteration(self,
@@ -383,7 +431,8 @@ class colradlumo_calc:
                          mass_solar,
                          iter,
                          oscillator_breaker,
-                         debug_printing = False
+                         debug_printing = False,
+                         fraction_override=0.0
                          ):
         
         self.optical_depth(desired_temp,
@@ -391,7 +440,8 @@ class colradlumo_calc:
                            time_exp_days,
                            velocity_c,
                            mass_solar,
-                           printing=False)
+                           printing=False,
+                           fraction_override=fraction_override)
         
         self.colradpy_run.data['rates']['a_val'] = self.aval_save * self.escape_prob
         p1 = self.pops_normed
@@ -440,6 +490,10 @@ class colradlumo_calc:
         self.avalue_sum_check = abs( self.suma_old / self.suma_new -1.0)
         if ( self.avalue_sum_check < 0.001):
             self.converged = True
+        
+        #if (self.pdiff < 1e-3):
+        #    self.converged = True
+        
         self.suma_old = self.suma_new
 
         return 0
@@ -460,6 +514,7 @@ class colradlumo_calc:
         print('Luminosity in one solar mass: {:7.5E} ergs/s , {:7.5E} ph/s'.format(self.luminosity_ergs_per_solar_mass[index,temp_index,dens_index],self.luminosity_photons_per_solar_mass[index,temp_index,dens_index]))
         print('Require ion-mass of {:11.4f} M_solar for requested luminosity. '.format(required_mass))
 
+        return index,required_mass
 
 
     def scale_lumo_by_ion_mass(self,mass_of_ion_solar_units):
@@ -526,7 +581,7 @@ class colradlumo_calc:
                                        )
         return requestlines
 
-    def optical_depth(self,temperature,density,time_exp_days,velocity_c,mass_solarunits,ion_string='',printing=False):
+    def optical_depth(self,temperature,density,time_exp_days,velocity_c,mass_solarunits,ion_string='',printing=False,fraction_override=0.0):
         
         #select the densities closest to the user selectrion.
         density_index = np.argmin(np.abs(self.density - density))
@@ -541,11 +596,14 @@ class colradlumo_calc:
         populations/= np.sum(populations)
         
         #Setting the Sob density array
-        num_lines = len(self.pec_levels)
+        num_lines = len(self.colradpy_run.data['rates']['excit']['col_transitions'])
+        #print('optical depth nl:',num_lines)
         optical_depth = np.ones(num_lines)* SOBOLEV_CONST#Sobolev const = e^2 / (m_e c)
         optical_depth_test = np.zeros(num_lines)
+        
         time_exp_cgs = time_exp_days * 24.0 * 3600.0
         volume = 4.0 * np.pi * (C_CGS* time_exp_cgs*velocity_c)**3 / 3.0
+        
         num_ions = mass_solarunits * self.num_ions_in_a_solar_mass
         eps = 1.0 / (4.0 * np.pi)
 
@@ -570,23 +628,34 @@ class colradlumo_calc:
         
         for ii in range(0, num_lines):
             
-            upper = self.pec_levels[ii][0]+1
-            lower = self.pec_levels[ii][1]+1
+            upper = self.colradpy_run.data['rates']['excit']['col_transitions'][ii][0]
+            lower = self.colradpy_run.data['rates']['excit']['col_transitions'][ii][1]
             correction = 1.0 - self.statistical_weights[lower-1]*populations[upper-1]\
                                 /self.statistical_weights[upper-1]*populations[lower-1]
             
             #Convert A -value to f value
             f_value = self.avalues[upper-1,lower-1] * self.statistical_weights[upper-1]\
-                        /self.statistical_weights[lower-1] * self.wl_vac_ang[ii]**2
+                        /self.statistical_weights[lower-1] * self.wl_vac_ang_matrix[upper-1,lower-1]**2
             f_value /= OSCILLATOR_CONST
             fvalue_array[ii] = f_value
 
            # print(f_value)
             #calculate optical depth - put wavelength in MKS as so is the Sob factor... time_exp in secs?
 
-            factor = f_value * self.wl_vac_nm[ii] * 1e-7 * time_exp_cgs * populations[lower-1] * num_ions * correction / volume
+            
+            if fraction_override != 0.0:
+                ion_density = populations[lower-1] * fraction_override * self.density[density_index]
+            else:
+                ion_density = populations[lower-1] * num_ions * correction / volume
+
+            
+            
+            factor = f_value * self.wl_vac_ang_matrix[upper-1,lower-1] * 1e-7 * time_exp_cgs * ion_density
+            
+            
             optical_depth[ii] *= factor
-            optical_depth_test[ii] = (self.wl_air_nm[ii]*1e-7)**3 * eps*self.avalues[upper-1,lower-1] * 0.5 * populations[lower-1]*(self.statistical_weights[upper-1]/self.statistical_weights[lower-1] - populations[upper-1]/populations[lower-1])*time_exp_cgs *num_ions/volume
+            
+            #optical_depth_test[ii] = (self.wl_air_nm[ii]*1e-7)**3 * eps*self.avalues[upper-1,lower-1] * 0.5 * populations[lower-1]*(self.statistical_weights[upper-1]/self.statistical_weights[lower-1] - populations[upper-1]/populations[lower-1])*time_exp_cgs *num_ions/volume
             #print(optical_depth[ii],optical_depth_test[ii])
             upper_j   = self.angular_momenta[upper-1]
             lower_j   = self.angular_momenta[lower-1]
@@ -624,9 +693,9 @@ class colradlumo_calc:
 
         if printing:
             print(header)
-            for ii in range(0,len(optical_depth)):
-                    upper = self.pec_levels[ii][0]
-                    lower = self.pec_levels[ii][1]
+            for ii in range(0,1000):
+                    upper = self.colradpy_run.data['rates']['excit']['col_transitions'][ii][0]
+                    lower = self.colradpy_run.data['rates']['excit']['col_transitions'][ii][1]
                     print('{:6}'.format(ion_string),strings[ii])
 
                     #if ii ==0 :
@@ -825,8 +894,9 @@ class colradlumo_calc:
         temp_index = np.argmin(np.abs(self.temp - temperature))
         #print(density_index,temp_index)
         broadened_spec = np.zeros_like(wavelength_array) 
+        print(temp_index,density_index)
+
         for (index,wavelength) in enumerate(self.wl_air_nm.flatten()):
-            #print(index)
             if (wavelength != 0.0) and (wavelength<1000*wavelength_array[-1]):
                 broadened_spec += self.scaled_lumo_ergs[index,temp_index,density_index] * gaussian_kernel_lumo_density_new(wavelength,velocity_fwhm_cunits,wavelength_array)
                 #print(self.scaled_lumo_ergs[0],wavelength)
@@ -871,3 +941,96 @@ def trap(wl,lumo):
     for ii in range(0,len(wl)-1,1):
         integral += 0.5 * (wl[ii+1]-wl[ii]) * (lumo[ii]+lumo[ii+1])
     return integral
+
+
+
+def produce_lumo_for_jwst(adf04_path,density,temperature_kelvin,
+                          amu=0.0,
+                          opacity_override = 0.0,
+                          time_exp=0.0,
+                          velocity=0.0,
+                          opacity_accelerator=False,
+                          writepath=''):
+    
+    temperature_ev = np.array([temperature_kelvin]) / 11600 
+    
+    density_ar = np.array([density])
+    
+    
+    colrad_lumo_run = colradlumo_calc(
+        adf04_path,
+        density_ar,
+        temperature_ev,
+        atomic_mass_number=amu
+    )
+    mass = np.array([1e0])
+
+    if time_exp != 0:
+        colrad_lumo_run.convergeOpacity(temperature_ev[0],
+                                        density_ar[0],
+                                        time_exp_days=time_exp,
+                                        velocity_c=velocity,
+                                        mass_solar=1.0,
+                                        fraction_override=opacity_override,
+                                        oscillator_breaker=opacity_accelerator)
+        
+    colrad_lumo_run.scale_lumo_by_ion_mass(mass)
+
+    file_name = str(colrad_lumo_run.element) + str(colrad_lumo_run.charge_roman) + 'Dens={:8.2e}.Temp={:4.0f}.dat'.format(
+        density,
+        temperature_kelvin
+    )
+    
+    if writepath != '':
+        if not ('/' in writepath):
+            writepath += '/'
+        file_name = writepath + file_name
+             
+    g = open(file_name,'w')
+    #colrad_lumo_run.colradpy_run.processed.
+    format_string = '{:2} {:5} {:11.4f} {:11.4E}\n'
+    
+    lumo = colrad_lumo_run.scaled_lumo_ergs[:,0,0,0]
+    
+    args = np.argsort(lumo)[::-1]
+    
+    for ii in range(0 ,len(colrad_lumo_run.wl_air_nm)):
+        lumo = colrad_lumo_run.scaled_lumo_ergs[args[ii],0,0,0]
+        wl   = colrad_lumo_run.wl_vac_nm[args[ii]]
+        g.write(format_string.format(
+            colrad_lumo_run.element,
+            colrad_lumo_run.charge_roman,
+            wl,
+            lumo
+        )) 
+        
+    g.close()    
+    
+    
+    return 0 
+
+#https://stackoverflow.com/questions/28777219/basic-program-to-convert-integer-to-roman-numerals
+ROMAN = [
+    (1000, "M"),
+    ( 900, "CM"),
+    ( 500, "D"),
+    ( 400, "CD"),
+    ( 100, "C"),
+    (  90, "XC"),
+    (  50, "L"),
+    (  40, "XL"),
+    (  10, "X"),
+    (   9, "IX"),
+    (   5, "V"),
+    (   4, "IV"),
+    (   1, "I"),
+]
+
+def int_to_roman(number):
+    result = []
+    for (arabic, roman) in ROMAN:
+        (factor, number) = divmod(number, arabic)
+        result.append(roman * factor)
+        if number == 0:
+            break
+    return "".join(result)
