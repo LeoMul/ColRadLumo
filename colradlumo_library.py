@@ -333,7 +333,6 @@ class colradlumo_calc:
                 
 
     def init_lumo(self):
-        print(self.pec[1382])
         lumo_per_ion = np.zeros([len(self.wl_air_nm),self.num_temps,self.num_dens])
         #print('INIT LUMO',self.pec[0,0,0])
         for ii in range(0,self.num_dens):
@@ -396,9 +395,13 @@ class colradlumo_calc:
                         mass_solar,
                         oscillator_breaker=False,
                         debug_printing = False,
-                        fraction_override = 0.0):
-
-        for ii in range(0,MAX_OPACITY_ITER):
+                        fraction_override = 0.0,
+                        relaxation_steps=9999):
+        ns =  min(relaxation_steps,MAX_OPACITY_ITER)
+        self.escape_prob = np.ones_like(self.aval_save)
+        self.allowed = self.aval_save > 1e2
+        self.forbidden = np.invert(self.allowed)
+        for ii in range(0,ns):
             
             self.opacityIteration(
                          desired_temp,
@@ -419,9 +422,10 @@ class colradlumo_calc:
 
                 break
         
-        if (ii == MAX_OPACITY_ITER-1):
+        if (ii == ns-1):
             print('warning - opacity calculation may not be converged for {} {}'.format(self.element,self.charge_roman))
         self.init_lumo()
+        self.scale_lumo_by_ion_mass(np.array([mass_solar]))
         
     def opacityIteration(self,
                          desired_temp,
@@ -434,7 +438,8 @@ class colradlumo_calc:
                          debug_printing = False,
                          fraction_override=0.0
                          ):
-        
+        self.escape_prob_old = self.escape_prob
+        mean1  = np.mean(self.escape_prob_old)
         self.optical_depth(desired_temp,
                            desired_density,
                            time_exp_days,
@@ -442,21 +447,32 @@ class colradlumo_calc:
                            mass_solar,
                            printing=False,
                            fraction_override=fraction_override)
-        
-        self.colradpy_run.data['rates']['a_val'] = self.aval_save * self.escape_prob
         p1 = self.pops_normed
+        self.escape_prob = 0.5 * (self.escape_prob + self.escape_prob_old) #take average for stability
+        print(72*'-')
+        form1= '{:10}{:10}{:10}{:10}{:10}'
+        print("Iter:      ",form1.format('Min','Max','Average','Median','StDev'))
+        form = '{:10.3E}{:10.3E}{:10.3E}{:10.3E}{:10.3E}'
+        print('Full:     ',form.format(np.min(self.escape_prob),np.max(self.escape_prob),np.mean(self.escape_prob),np.median(self.escape_prob),np.std(self.escape_prob)))
+        print('Allowed:  ',form.format(np.min(self.escape_prob[self.allowed]),np.max(self.escape_prob[self.allowed]),np.mean(self.escape_prob[self.allowed]),np.median(self.escape_prob[self.allowed]),np.std(self.escape_prob[self.allowed])))
+        print('Forbidden:',form.format(np.min(self.escape_prob[self.forbidden]),np.max(self.escape_prob[self.forbidden]),np.mean(self.escape_prob[self.forbidden]),np.median(self.escape_prob[self.forbidden]),np.std(self.escape_prob[self.forbidden])))
+        self.beta_allowed_mean   = np.mean(self.escape_prob[self.allowed])
+        self.beta_allowed_geomean = np.exp(np.log(self.escape_prob[self.allowed]).mean())
+        self.beta_allowed_median = np.median(self.escape_prob[self.allowed])
+        self.beta_allowed_stdev  = np.std(self.escape_prob[self.allowed])
 
+        self.colradpy_run.data['rates']['a_val'] = self.aval_save * self.escape_prob
         self.colradpy_run.populate_cr_matrix()
         self.colradpy_run.solve_quasi_static() 
-        
         self.normalisePops()
-        
         p2 = self.pops_normed 
         self.pdiff = np.sum(np.power(p1-p2,2))
         
         self.avalues = self.colradpy_run.data['cr_matrix']['A_ji']
         sumavalues = np.sum(self.avalues)
         self.suma_new = sumavalues
+        
+        
         if debug_printing:
             print('population check: ',self.pdiff)
             print('{:5}, {:10.2e}'.format(iter,np.sum(self.avalues)))
@@ -464,27 +480,27 @@ class colradlumo_calc:
         tracker = self.tracker
         tracker[iter%4] = sumavalues
         
-        num_oscillations = 0
-        warned = False
-        if ( (iter%4 ==0) and iter > 0):
-            t1 = tracker[0] + tracker[1]
-            t2 = tracker[2] + tracker[3]
-            if (abs(t1/t2 -1.0) < 0.01):
-                num_oscillations += 1
-                if oscillator_breaker:
-                    
-                    if debug_printing:
-                        print('calling epic accelerator, oscl detectected: {:10.2e} {:10.2e}'.format(t1,t2))
-                        
-                    avg = 0.5 * self.escape_prob + 0.5 * self.esc_old  
-                    self.colradpy_run.data['rates']['a_val'] = self.aval_save * avg
-                    self.colradpy_run.populate_cr_matrix()
-                    self.colradpy_run.solve_quasi_static() 
-                    self.avalues = self.colradpy_run.data['cr_matrix']['A_ji']                    
-                    self.normalisePops()
-                elif ( (num_oscillations > 4) and (not warned) ) : 
-                    print('Oscillations detected, recommend running with accelerator.')
-                    warned = True
+        #num_oscillations = 0
+        #warned = False
+        #if ( (iter%4 ==0) and iter > 0):
+        #    t1 = tracker[0] + tracker[1]
+        #    t2 = tracker[2] + tracker[3]
+        #    if (abs(t1/t2 -1.0) < 0.01):
+        #        num_oscillations += 1
+        #        if oscillator_breaker:
+        #            
+        #            if debug_printing:
+        #                print('calling epic accelerator, oscl detectected: {:10.2e} {:10.2e}'.format(t1,t2))
+        #                
+        #            avg = 0.5 * self.escape_prob + 0.5 * self.esc_old  
+        #            self.colradpy_run.data['rates']['a_val'] = self.aval_save * avg
+        #            self.colradpy_run.populate_cr_matrix()
+        #            self.colradpy_run.solve_quasi_static() 
+        #            self.avalues = self.colradpy_run.data['cr_matrix']['A_ji']                    
+        #            self.normalisePops()
+        #        elif ( (num_oscillations > 4) and (not warned) ) : 
+        #            print('Oscillations detected, recommend running with accelerator.')
+        #            warned = True
                         
         self.esc_old = self.escape_prob
         self.avalue_sum_check = abs( self.suma_old / self.suma_new -1.0)
@@ -549,16 +565,16 @@ class colradlumo_calc:
         print('Te = {} eV'.format(self.temp[temp_index]))
         print('Ne = {} cm-3'.format(self.density[density_index]))
         print('M  = {} Msun'.format(self.mass[mass_index]))
-        array_to_be_sorted = self.scaled_lumo_ergs[:,temp_index,density_index].flatten()
-        
-        #array_to_be_sorted = self.wl_air_nm[:].flatten()
 
-        arguments = arguments[np.argsort(array_to_be_sorted[arguments])][::-1]
         #if the user did not scale by a mass yet, just set it to one solar mass
         if len(self.scaled_lumo_ergs) == 0:
             print('scale_lumo_by_ion_mass() hasnt been called - scaling to unit solar mass')
             self.scale_lumo_by_ion_mass(mass_of_ion_solar_units=1.0)
-
+        array_to_be_sorted = self.scaled_lumo_ergs[:,temp_index,density_index,mass_index].flatten()
+        #array_to_be_sorted = self.wl_air_nm[:].flatten()
+        arguments = np.argsort(array_to_be_sorted)[::-1] [0:n_select] #? why did i do this 
+        #arguments = np.argsort()
+        
         #putting all this in the class. 
 
         element_code = self.colradpy_run.data['atomic']['element'].replace(' ', '')+str(self.colradpy_run.data['atomic']['charge_state'])+'+'
@@ -607,9 +623,12 @@ class colradlumo_calc:
         num_ions = mass_solarunits * self.num_ions_in_a_solar_mass
         eps = 1.0 / (4.0 * np.pi)
 
-        header = '      wlvac(nm),  transition,     E_j (cm-1),         Level j,      Pop(j)     E_i (cm-1),        Level i,      Pop(j),  A_ij(s^-1),   SobDepth'
-
-
+        header = '       wlvac(nm),  transition,     E_j (cm-1),         Level j,           Pop(j),     E_i (cm-1),        Level i,           Pop(j), A_ij(s^-1),   SobDepth,     SobEsc'
+        idd = 0 
+        if volume != 0:
+            idd = num_ions/volume 
+        if fraction_override != 0.0 : 
+            idd = fraction_override * self.density[density_index]
         if printing:
             print('Requested density: {:10.2e}'.format(density))
             print('Using density:     {:10.2e}'.format(self.density[density_index] ))
@@ -617,7 +636,7 @@ class colradlumo_calc:
             print('Using temp:        {:10.2f}'.format(self.temp[temp_index] ))
             print('Volume:            {:10.2e}'.format(volume))
             print('Num ions:          {:10.2e}'.format(num_ions))
-            print('Ion Density:       {:10.2e}'.format(num_ions/volume))
+            print('Ion Density:       {:10.2e}'.format(idd))
         fvalue_array = np.zeros(num_lines)
         strings = []
         string_format = ' {:8.2f},     {:2} - {:2}, {:14.3f},  {:14}, {:10.2E}, {:14.3f}, {:10}, {:10.2E}, {:10.2E}, {:10.2E}, {:10.2E}'
@@ -635,7 +654,7 @@ class colradlumo_calc:
             
             #Convert A -value to f value
             f_value = self.avalues[upper-1,lower-1] * self.statistical_weights[upper-1]\
-                        /self.statistical_weights[lower-1] * self.wl_vac_ang_matrix[upper-1,lower-1]**2
+                        * self.wl_vac_ang_matrix[upper-1,lower-1]**2 / self.statistical_weights[lower-1]
             f_value /= OSCILLATOR_CONST
             fvalue_array[ii] = f_value
 
@@ -646,15 +665,14 @@ class colradlumo_calc:
             if fraction_override != 0.0:
                 ion_density = populations[lower-1] * fraction_override * self.density[density_index]
             else:
-                ion_density = populations[lower-1] * num_ions * correction / volume
-
-            
-            
-            factor = f_value * self.wl_vac_ang_matrix[upper-1,lower-1] * 1e-8 * time_exp_cgs * ion_density
-            
-            
+                ion_density = populations[lower-1] * num_ions / volume 
+            factor = f_value * self.wl_vac_ang_matrix[upper-1,lower-1] * 1e-8 * time_exp_cgs * ion_density * correction 
             optical_depth[ii] *= factor
             
+            wlcm = self.wl_vac_ang_matrix[upper-1,lower-1] * 1e-8 
+            eightpi = 8.0 * np.pi 
+            test = self.avalues[upper-1,lower-1] * (wlcm**3) * time_exp_cgs * ion_density * self.statistical_weights[upper-1] * correction/ (eightpi*self.statistical_weights[lower-1])
+            #print(test,optical_depth[ii])
             #optical_depth_test[ii] = (self.wl_air_nm[ii]*1e-7)**3 * eps*self.avalues[upper-1,lower-1] * 0.5 * populations[lower-1]*(self.statistical_weights[upper-1]/self.statistical_weights[lower-1] - populations[upper-1]/populations[lower-1])*time_exp_cgs *num_ions/volume
             #print(optical_depth[ii],optical_depth_test[ii])
             upper_j   = self.angular_momenta[upper-1]
@@ -667,7 +685,7 @@ class colradlumo_calc:
                 upper_csf = (15-len(upper_csf))*' ' + upper_csf
             upper_wav = self.energy_levels_cm[upper-1]
             lower_wav = self.energy_levels_cm[lower-1]
-            wavel = self.wl_vac_nm[ii]
+            wavel = self.wl_vac_ang_matrix[upper-1,lower-1] * 0.1 
             
             if optical_depth[ii] > 1e-7:
                 self.escape_prob[ii] = (1.0 - np.exp(-optical_depth[ii])) / optical_depth[ii]
@@ -894,7 +912,7 @@ class colradlumo_calc:
         temp_index = np.argmin(np.abs(self.temp - temperature))
         #print(density_index,temp_index)
         broadened_spec = np.zeros_like(wavelength_array) 
-        print(temp_index,density_index)
+        #print(temp_index,density_index)
 
         for (index,wavelength) in enumerate(self.wl_air_nm.flatten()):
             if (wavelength != 0.0) and (wavelength<1000*wavelength_array[-1]):
