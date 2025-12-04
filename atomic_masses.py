@@ -6,7 +6,31 @@ def getAtomicNumber(desired_element):
     print('failed to get atomic number')
     return -1 
     
+#https://stackoverflow.com/questions/28777219/basic-program-to-convert-integer-to-roman-numerals
+ROMAN = [
+    (1000, "M"),
+    ( 900, "CM"),
+    ( 500, "D"),
+    ( 400, "CD"),
+    ( 100, "C"),
+    (  90, "XC"),
+    (  50, "L"),
+    (  40, "XL"),
+    (  10, "X"),
+    (   9, "IX"),
+    (   5, "V"),
+    (   4, "IV"),
+    (   1, "I"),
+]
 
+def int_to_roman(number):
+    result = []
+    for (arabic, roman) in ROMAN:
+        (factor, number) = divmod(number, arabic)
+        result.append(roman * factor)
+        if number == 0:
+            break
+    return "".join(result)
 
 elements=['H ','He','Li','Be','B ','C ','N ','O ','F ','Ne','Na','Mh'
       ,'Al','Si','P ','S ','Cl','Ar','K ','Ca','Sc','Ti','V ','Cr','Mm'
