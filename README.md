@@ -17,7 +17,7 @@ $$
     L_{j \to i} = \frac{hc}{\lambda_{j \to i}}   \frac{n_e\text{PEC}_{j\to i } }{\sum_i N_i} \frac{M_{\text{ion}}}{m_{\text{ion}}} ~~\text{[erg s$^{-1}$]}
 $$ 
 
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; where $m_{\text{ion}}$ is the nuclear mass of your atomic species - which is taken from a lookup table in `atomic_masses.py`. This feature requires &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; you to have set the atomic symbol correctly in the adf04 file.
+where $m_{\text{ion}}$ is the nuclear mass of your atomic species - which is taken from a lookup table in `atomic_masses.py`. This feature requires &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; you to have set the atomic symbol correctly in the adf04 file.
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 
 2. Spectral synthesis, assuming some FWHM velocity $\beta$ and central wavelength 
 $\lambda_0$ (nm) - 
@@ -27,7 +27,7 @@ $$
 L^{\lambda}_{j \to i} = \frac{1}{10\sigma_\lambda \sqrt{2\pi}} \exp\left( -\frac{1}{2} \left(\frac{\lambda_0 - \lambda}{\sigma_\lambda}\right)^2\right) ~~\text{[erg s$^{-1}$ Å$^{-1}$]}
 $$
 
-&nbsp;&nbsp;&nbsp; where the additional factor of 10 changes the units to Angstrom.
+where the additional factor of 10 changes the units to Angstrom.
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 
 3. Production of mass-density-temperature contour plots for diagnosis of spectral lines. (public code coming)
 4. Isolate strongest emission lines 
@@ -41,11 +41,13 @@ $$
 $$
 
 where the level densities $n_j \propto N_j$ are calculated either at some velocity and explosion time, or as a fraction of the electron density. At the first iteration, we take $\beta_{i\to j}^0 = 1$ and calculate the populatons $N_j$. This is used to calculate a new estimate to $\beta_{i\to j}^1$ We then gradually add on the opacity at iteration $k$ ala 
+
 $$
 \begin{equation*}
     \beta_{i\to j}^k \to \frac{1}{2} \beta_{i\to j}^k + \frac{1}{2} \beta_{i\to j}^{k-1}
 \end{equation*}
 $$
+
 as is commonly done in self-consistent iterations. Internally, the ColRadPy class has its A-value arrays updated according to $$A_{i \to j} \to A_{i \to j}\beta^k_{i \to j,}$$ until convergence. This presently is only implemeneted for a single density and temperature point - in general the Sobolov escape factors are themselves dependent on temperature and density. 
 
 *Works using this code*:
