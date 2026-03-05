@@ -13,7 +13,7 @@ Credit to ColRadPy: https://github.com/johnson-c/ColRadPy
 *Features*
 1. Calculation of astrophysical luminosities,
 $$
-    L_{j \to i} = \frac{hc}{\lambda_{j \to i}}   \frac{n_e\text{PEC}_{j\to i } }{\sum_i N_i} \frac{M_{\text{ion}}}{m_{\text{ion}}} ~~\text{[erg s$^{-1}$]}
+    L_{j \to i} = \frac{hc}{\lambda_{j \to i}}   \frac{n_e\text{PEC}_{j\to i } }{\sum_i N_i} \frac{M_{\text{ion}}}{m_{\text{ion}}} 
 $$ where $m_{\text{ion}}$ is the nuclear mass of your atomic species - which is taken from a lookup table in `atomic_masses.py`. This feature requires you to have set the atomic symbol correctly in the adf04 file.
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 
 2. Spectral synthesis, assuming some FWHM velocity $\beta$ and central wavelength 
