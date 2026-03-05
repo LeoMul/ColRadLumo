@@ -22,8 +22,10 @@ where $m_{\text{ion}}$ is the nuclear mass of your atomic species - which is tak
 2. Spectral synthesis, assuming some FWHM velocity $\beta$ and central wavelength  $\lambda_0$ (nm) - 
 
 $$
-\sigma_\lambda = \lambda_0 \beta /2.355 ~~\text{[nm]} \\
-L^{\lambda}_{j \to i} = \frac{1}{10\sigma_\lambda \sqrt{2\pi}} \exp\left( -\frac{1}{2} \left(\frac{\lambda_0 - \lambda}{\sigma_\lambda}\right)^2\right) ~~\text{[erg s$^{-1}$ Å$^{-1}$]}
+\begin{align*}
+\sigma_\lambda &= \lambda_0 \beta /2.355 ~~\text{[nm]} \\
+L^{\lambda}_{j \to i} &= \frac{1}{10\sigma_\lambda \sqrt{2\pi}} \exp\left( -\frac{1}{2} \left(\frac{\lambda_0 - \lambda}{\sigma_\lambda}\right)^2\right) ~~\text{[erg s$^{-1}$ Å$^{-1}$]}
+\end{align*}
 $$
 
 where the additional factor of 10 changes the units to Angstrom.
