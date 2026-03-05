@@ -18,7 +18,8 @@ $$
 $$ 
 
 where $m_{\text{ion}}$ is the nuclear mass of your atomic species - which is taken from a lookup table in `atomic_masses.py`. This feature requires &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; you to have set the atomic symbol correctly in the adf04 file.
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ 
 2. Spectral synthesis, assuming some FWHM velocity $\beta$ and central wavelength 
 $\lambda_0$ (nm) - 
 
