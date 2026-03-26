@@ -86,113 +86,7 @@ class spectrum:
         continuum = a*np.power(wavelength_range,b)*1e35 +blackbody_cgs_lumo   
         self.continuum = continuum
         #return continuum 
-        
 
-    def plot(self,
-             dpi = 200,
-             xlimits = [-1,-1],
-             ylimits = [-1,-1],
-             colormap = 'tab20',
-             legend=True,
-             cumulative=True,
-             integralThresh = 0.005,
-             massThresh = 1e-10,
-             printInterestingLines=False,
-             interestingThresh = 1e37,
-             plotVFI=True,
-             yscale='linear'):
-        '''
-        This routine was refactored by Google Gemini 3, 26.03.26.
-        '''
-        
-        import matplotlib.pyplot as plt 
-        import numpy as np
-        from matplotlib import rc
-        
-        rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
-        plt.rcParams['text.usetex'] = True
-        plt.rcParams.update({'font.size': 12})
-
-        xlimitsPlot = [self.wlMin, self.wlMax]
-        ylimitsPlot = [0, 1.2]
-        if xlimits != [-1, -1]: 
-            xlimitsPlot = xlimits
-        if ylimits != [-1, -1]: 
-            ylimitsPlot = ylimits
-        if yscale == 'log': 
-            ylimitsPlot[0] = 1e-4
-
-
-        ratios = self.integrals / self.sumIntegrals
-        selected_indices = np.where(ratios > integralThresh)[0]
-        
-        if len(selected_indices) == 0:
-            return None, None
-
-        #Handle color to plot.
-        cmap = plt.get_cmap(colormap)
-        colors = [cmap(i) for i in np.linspace(0, 1, len(selected_indices))]
-        color_mapping = {idx: colors[i] for i, idx in enumerate(selected_indices)}
-        
-        fig, ax = plt.subplots(figsize=(7, 5), dpi=dpi)
-        fig.subplots_adjust(right=0.7) 
-        ax.set_yscale(yscale)
-
-        if plotVFI:
-            vfiwl, vfilum = getVFI()
-            ax.step(vfiwl, vfilum * 1e-35, 'k', linewidth=0.2, where='mid', alpha=0.3)
-
-        # 4. PLOTTING ORDER (The Fix)
-        # We sort selected indices in REVERSE order (e.g., [50, 42, 10, 2])
-        # This ensures the 'fullest' cumulative sum is the bottom layer.
-        loop_order = sorted(selected_indices, reverse=True)
-
-        handle_dict = {}
-
-        # 5. Plotting Loop
-        for ii in loop_order:
-            color = color_mapping[ii]
-            
-            # Mass Label Logic
-            massStringVoodoo = '{:8.2e}'.format(self.masses[ii])
-            exphack = int(massStringVoodoo[-1])    
-            massLabel = fr"~M = {massStringVoodoo[:4]} $\times 10^{{-{exphack}}} \mathrm{{ M}}_\odot$"
-            full_label = self.elementsChargePlus[ii] + massLabel
-
-            if cumulative:
-                # Plotting from high index to low index prevents overshadowing
-                ax.fill_between(self.wavelengths, self.cumulative[ii, :] * 1e-35, 
-                                color=color, step='mid', zorder=-ii)
-            else:
-                thisSpec = self.spectra[ii, :] * self.masses[ii] * 1e-35
-                ax.fill_between(self.wavelengths, thisSpec, color=color, step='mid', alpha=0.8)
-
-            # Legend Line Handle
-            line_handle, = ax.plot([], [], color=color, label=full_label, linewidth=1.5)
-            handle_dict[ii] = line_handle
-
-        # Plot total sum line
-        ax.plot(self.wavelengths, self.total * 1e-35, color='k', linewidth=1, label='Total')
-
-        # 6. Apply Limits & Labels
-        ax.set_xlim(xlimitsPlot)
-        ax.set_ylim(ylimitsPlot)
-        ax.set_xlabel('Wavelength (nm)')
-        ax.set_ylabel(r'Luminosity (10$^{35}$ erg s$^{-1}$ Å$^{-1}$)')
-
-        # 7. Legend: Restore order of the elements array
-        if legend:
-            sorted_keys = sorted(handle_dict.keys()) # Numerical order of indices
-            final_handles = [handle_dict[k] for k in sorted_keys]
-            # Add Total at the very top
-            total_h, total_l = ax.get_legend_handles_labels()
-            t_idx = total_l.index('Total')
-            
-            ax.legend([total_h[t_idx]] + final_handles, 
-                      ['Total'] + [h.get_label() for h in final_handles],
-                      loc="center left", bbox_to_anchor=(1.05, 0.67), frameon=False)
-
-        return fig, ax
     
     def totalSpectrum(self,listOfMasses):
         self.masses = np.array(listOfMasses)
@@ -219,7 +113,7 @@ class spectrum:
         self.total += self.continuum
         self.sumIntegrals = np.sum(self.integrals)
         
-    def plotgemini(self,
+    def plot(self,
              dpi = 200,
              xlimits = [-1,-1],
              ylimits = [-1,-1],
@@ -260,7 +154,6 @@ class spectrum:
         color_mapping = {idx: colors[i] for i, idx in enumerate(selected_indices)}
         
         fig, ax = plt.subplots(figsize=(7, 5), dpi=dpi)
-        fig.subplots_adjust(right=0.7) 
         ax.set_yscale(yscale)
 
         if plotVFI:
