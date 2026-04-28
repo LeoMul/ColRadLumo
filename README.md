@@ -1,6 +1,8 @@
 # ColRadLumo
 
-This code internally uses [ColRadPy](https://github.com/johnson-c/ColRadPy) ([paper citation, Curt Johnson (2019)](https://doi.org/10.1016/j.nme.2019.01.013)) as a library to solve the statistical rate equations. The resulting data is then post-processed into astrophysical absolute emission lines. The code is designed to be ran interactively in a JuPyter notebook. The input data is specified by user in the adf04 format.
+This code internally uses [ColRadPy](https://github.com/johnson-c/ColRadPy) ([paper citation, Curt Johnson (2019)](https://doi.org/10.1016/j.nme.2019.01.013)) as a library to solve the statistical rate equations. The resulting data is then post-processed into astrophysical absolute emission lines. The code is designed to be ran interactively in a JuPyter notebook. The input data is specified by user in the adf04 format. 
+
+It is my intention to eventually replace the ColRadPy dependency with my own fortran written CRM code - as my use for ColRadPy for astrophysics is fairly inefficient.
 
 **If you use this code**
 Please cite Curt's original [code](https://github.com/johnson-c/ColRadPy) and [paper](https://doi.org/10.1016/j.nme.2019.01.013), and this repository if possible.
