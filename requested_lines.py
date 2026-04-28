@@ -1,3 +1,6 @@
+#This module contains the requested line sub-class. 
+#This class stores all of the lines requested by the user.
+import numpy as np 
 class requested_lines:
     def __init__(
                  self,
@@ -15,7 +18,8 @@ class requested_lines:
                  temp=0.0,
                  dens=0.0,
                  elementcode='',
-                 beta = 0.0
+                 beta = 0.0,
+                 ratio = []
                  ):
         self. avalue_sum_check = np.inf
         self.wl_vac_nm = wavelengths
@@ -35,9 +39,14 @@ class requested_lines:
         self.mass = mass 
         self.dens = dens
         self.element_code = elementcode
-
+        self.ratio = ratio
         self.header = '    wlvac(nm),    wlair(nm),  transition,     E_j (cm-1),          Level j,      E_i (cm-1),          Level i, A_ij(s^-1), pec cm^3/s,   L (ph/s),  L (erg/s)'
         self.string_format = ' {:12.4f}, {:12.4f},     {:2} - {:2}, {:14.3f},  {:14}, {:14.3f}, {:10}, {:10.2E}, {:10.2E}, {:10.2E}, {:10.2E}'
+        self.ratio_bool = False
+        if len(ratio) > 0 :
+            self.ratio_bool = True
+            self.header += ',   Rel. Str'
+            self.string_format += ', {:10.2E}'
         
         self.header_with_element_code = ' ElemCod, wlvac(nm), wlair(nm),  transition,     E_j (cm-1),         Level j,     E_i (cm-1),        Level i, A_ij(s^-1), pec cm^3/s,   L (ph/s),  L (erg/s)'
         self.string_format_with_element_code = '{:8}, {:12.4f}, {:12.4f},     {:2} - {:2}, {:14.3f},  {:14}, {:14.3f}, {:10}, {:10.2E}, {:10.2E}, {:10.2E}, {:10.2E}'
@@ -75,8 +84,7 @@ class requested_lines:
             self.wl_values_air.append(wavelengths_air[jj])
             this_pec = self.pec[jj]
             this_fwhm = 2.355 * beta * wavel / np.sqrt(2)
-            if beta == 0 :
-                strings.append(self.string_format.format(wavel,
+            array = [wavel,
                                                         wavelengths_air[jj],
                                                         lower,
                                                         upper,
@@ -87,25 +95,18 @@ class requested_lines:
                                                         avalue,
                                                         this_pec,
                                                         lumo,
-                                                        flux
+                                                        flux]
+            
+            if self.ratio_bool:
+                array.append(ratio[jj])
+            
+            if beta != 0 :
+                array.append(this_fwhm)
+                
+            strings.append(self.string_format.format(
+                                                        *array)
                                                         )
-                                                        )
-            else:
-                strings.append(self.string_format.format(wavel,
-                                                        wavelengths_air[jj],
-                                                        lower,
-                                                        upper,
-                                                        lower_wav,
-                                                        lower_csf,
-                                                        upper_wav,
-                                                        upper_csf,
-                                                        avalue,
-                                                        this_pec,
-                                                        lumo,
-                                                        flux,
-                                                        this_fwhm
-                                                        )
-                                                        )
+
             strings_with_codes.append(self.string_format_with_element_code.format(self.element_code,
                                                      wavel,
                                                      wavelengths_air[jj],

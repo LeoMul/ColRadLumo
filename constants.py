@@ -7,6 +7,8 @@ PI              = 3.14159265359
 #Planck's constant times c in cgs e.g: erg cm s 
 HC_CGS = 6.63e-34 * 3e8 * 1e7 * 1e2
 
+NUM_NUCLEONS_IN_A_SOLAR_MASS = SOLAR_MASS_KG / NUCLEON_MASS_KG
+
 C_CGS = 3.00E10
 ELECTRON_MASS_G = 9.11E-28
 ELECTRIC_CHARGE_CGS_ESU = 4.8e-10

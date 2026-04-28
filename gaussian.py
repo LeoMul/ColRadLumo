@@ -1,5 +1,7 @@
 from constants import * 
 import numpy as np 
+#Gaussian broadening of 
+
 
 def gaussian_kernel_lumo_density_new(central_wavelength_nm,beta_fwhm,wavelength_range_nm):
     

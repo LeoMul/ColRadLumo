@@ -15,7 +15,7 @@ class colradlumo_calc:
                  density,
                  temp,
                  atomic_mass_number:float = 0.0,
-                 use_Opacity=False):
+                 norm_within_colradpy=True):
 
 
         self.adf04_path = adf04_path
@@ -43,7 +43,7 @@ class colradlumo_calc:
 
         #this is the default option, i 
         #just coded it this way as a failsafe.
-        norm_pops_for_pecs = False
+        norm_pops_for_pecs = norm_within_colradpy
         self.norm_pops_for_pecs = norm_pops_for_pecs
         num_temps = len(temp)
         num_dens = len(density)
@@ -137,6 +137,32 @@ class colradlumo_calc:
         self.tracker  = np.zeros(4)
         self.esc_old = np.ones_like(aval_save)
         
+    def lte(self,upper=2,lower=1):
+        
+        
+        self.lte_pops = np.zeros([len(self.colradpy_run.data['atomic']['energy']),len(self.temp)])
+        
+        for ii in range(0,len(self.temp)):
+            te = self.temp[ii]
+            self.lte_pops[0,ii] = 1.0
+            self.lte_pops[1:,ii] = (2*self.colradpy_run.data['atomic']['w'][1:]+1) * np.exp(- self.colradpy_run.data['atomic']['energy'][1:] / (8065.56*te)) / (2*self.colradpy_run.data['atomic']['w'][0]+1)
+            
+            self.lte_pops[:,ii] /= np.sum(self.lte_pops[:,ii])
+        
+        self.lumo_lte_ergs =np.zeros([ len(self.pec_levels), len(self.temp)])
+        
+    
+        for (jj,pair) in enumerate(self.pec_levels):
+            self.lumo_lte_ergs[jj,:] = self.lte_pops[max(pair),:] * ( self.colradpy_run.data['cr_matrix']['A_ji'][*pair]* self.num_ions_in_a_solar_mass)* self.photon_energies_ergs[jj]
+
+        
+        upper = upper - 1
+        lower = lower - 1 
+        
+        print( np.argwhere( (self.pec_levels[:,0] == upper) & (self.pec_levels[:,1] == lower))[0])
+        
+        
+        return None    
                 
 
     def init_lumo(self):
@@ -157,11 +183,13 @@ class colradlumo_calc:
     def getElementCode(self):
         #gets elements from the adf04 file
         try:
+            print('hello')
             f = open(self.adf04_path,'r')
+            
             firstLine = f.readline()
             f.close()
-
-            #print(firstLine)
+            
+            print(firstLine)
 
             #firstLine = firstLine.replace(' ','')
 
@@ -175,6 +203,8 @@ class colradlumo_calc:
 
         except:
             print('failed to get element code - debug please :)')
+            import sys 
+            sys.exit()
         
 
 
@@ -183,8 +213,10 @@ class colradlumo_calc:
         pec[pec<0] = 0.0 #1e-30
         
         pops = self.colradpy_run.data['processed']['pops_no_norm'][:,0,:,:]
+        #print(pops)
         #need to do a sum here over the right axis
         sum_pops = 1.0 + np.sum(pops,axis=0)
+        
         self.sum_pops = sum_pops
         self.pops_normed = pops / sum_pops
         if not self.norm_pops_for_pecs:
@@ -208,6 +240,11 @@ class colradlumo_calc:
         self.escape_prob = np.ones_like(self.aval_save)
         self.allowed = self.aval_save > 1e2
         self.forbidden = np.invert(self.allowed)
+        print(        np.sum(np.ones_like(self.allowed,dtype=float)[self.forbidden]))
+        
+        self.pops_no_sob = self.pops_normed.copy()
+        self.pec_no_sob = self.pec.copy()
+        
         for ii in range(0,ns):
             
             self.opacityIteration(
@@ -252,17 +289,18 @@ class colradlumo_calc:
                            time_exp_days,
                            velocity_c,
                            mass_solar,
-                           printing=False,
+                           printing=debug_printing,
                            fraction_override=fraction_override)
         p1 = self.pops_normed
         self.escape_prob = 0.5 * (self.escape_prob + self.escape_prob_old) #take average for stability
-        print(72*'-')
-        form1= '{:10}{:10}{:10}{:10}{:10}'
-        print("Iter:      ",form1.format('Min','Max','Average','Median','StDev'))
-        form = '{:10.3E}{:10.3E}{:10.3E}{:10.3E}{:10.3E}'
-        print('Full:     ',form.format(np.min(self.escape_prob),np.max(self.escape_prob),np.mean(self.escape_prob),np.median(self.escape_prob),np.std(self.escape_prob)))
-        print('Allowed:  ',form.format(np.min(self.escape_prob[self.allowed]),np.max(self.escape_prob[self.allowed]),np.mean(self.escape_prob[self.allowed]),np.median(self.escape_prob[self.allowed]),np.std(self.escape_prob[self.allowed])))
-        print('Forbidden:',form.format(np.min(self.escape_prob[self.forbidden]),np.max(self.escape_prob[self.forbidden]),np.mean(self.escape_prob[self.forbidden]),np.median(self.escape_prob[self.forbidden]),np.std(self.escape_prob[self.forbidden])))
+        if debug_printing:
+            print(72*'-')
+            form1= '{:10}{:10}{:10}{:10}{:10}'
+            print("Iter:      ",form1.format('Min','Max','Average','Median','StDev'))
+            form = '{:10.3E}{:10.3E}{:10.3E}{:10.3E}{:10.3E}'
+            print('Full:     ',form.format(np.min(self.escape_prob),np.max(self.escape_prob),np.mean(self.escape_prob),np.median(self.escape_prob),np.std(self.escape_prob)))
+            print('Allowed:  ',form.format(np.min(self.escape_prob[self.allowed]),np.max(self.escape_prob[self.allowed]),np.mean(self.escape_prob[self.allowed]),np.median(self.escape_prob[self.allowed]),np.std(self.escape_prob[self.allowed])))
+            print('Forbidden:',form.format(np.min(self.escape_prob[self.forbidden]),np.max(self.escape_prob[self.forbidden]),np.mean(self.escape_prob[self.forbidden]),np.median(self.escape_prob[self.forbidden]),np.std(self.escape_prob[self.forbidden])))
         self.beta_allowed_mean   = np.mean(self.escape_prob[self.allowed])
         self.beta_allowed_geomean = np.exp(np.log(self.escape_prob[self.allowed]).mean())
         self.beta_allowed_median = np.median(self.escape_prob[self.allowed])
@@ -342,6 +380,9 @@ class colradlumo_calc:
         return density_index,temp_index,mass_index 
     
     def return_lines(self,arguments,temp_index,density_index,mass_index,beta = 0.0): 
+        strongest = self.getStrongest(temp_index,density_index,mass_index)
+        ratio = self.scaled_lumo_ergs[arguments,temp_index,density_index,mass_index].flatten()/ strongest
+ 
         element_code = self.colradpy_run.data['atomic']['element'].replace(' ', '')+str(self.colradpy_run.data['atomic']['charge_state'])+'+'
         requestlines = requested_lines(self.wl_vac_nm[arguments],
                                        self.wl_air_nm[arguments],
@@ -357,10 +398,13 @@ class colradlumo_calc:
                                        self.temp[temp_index],
                                        self.density[density_index],
                                        element_code,
-                                       beta
+                                       beta,
+                                       ratio
                                        )
         return requestlines        
 
+    def getStrongest(self,temp_index,density_index,mass_index):
+        return max(self.scaled_lumo_ergs[:,temp_index,density_index,mass_index])
 
     def select_closest_lines(self,selection,temperature,density,mass ,beta=0.0 ) -> requested_lines:
         if len(self.scaled_lumo_ergs) == 0:
@@ -415,10 +459,24 @@ class colradlumo_calc:
 
         header = '       wlvac(nm),  transition,     E_j (cm-1),         Level j,           Pop(j),     E_i (cm-1),        Level i,           Pop(j), A_ij(s^-1),   SobDepth,     SobEsc'
         idd = 0 
-        if volume != 0:
+        if volume != 0.0:
             idd = num_ions/volume 
+            
         if fraction_override != 0.0 : 
             idd = fraction_override * self.density[density_index]
+#            
+        try:
+            if len(density) > 0 :
+                density = density[0]
+        except:
+            density = density 
+#
+        try:
+            if len(temperature) > 0 :
+                temperature = temperature[0]
+        except:
+            temperature = temperature 
+#            
         if printing:
             print('Requested density: {:10.2e}'.format(density))
             print('Using density:     {:10.2e}'.format(self.density[density_index] ))
@@ -434,16 +492,16 @@ class colradlumo_calc:
         self.escape_prob = np.ones_like(optical_depth)
         #ttt = np.argwhere(optical_depth > 1e-7)
         #self.escape_prob[ttt] = (1.0 - np.exp(-optical_depth[ttt])) / optical_depth[ttt]
-        
+        #print(populations)
         for ii in range(0, num_lines):
             
             upper = self.colradpy_run.data['rates']['excit']['col_transitions'][ii][0]
             lower = self.colradpy_run.data['rates']['excit']['col_transitions'][ii][1]
             correction = 1.0 - self.statistical_weights[lower-1]*populations[upper-1]\
-                                /self.statistical_weights[upper-1]*populations[lower-1]
+                                /(self.statistical_weights[upper-1]*populations[lower-1])
             
             #Convert A -value to f value
-            f_value = self.avalues[upper-1,lower-1] * self.statistical_weights[upper-1]\
+            f_value = self.avalue_save[upper-1,lower-1] * self.statistical_weights[upper-1]\
                         * self.wl_vac_ang_matrix[upper-1,lower-1]**2 / self.statistical_weights[lower-1]
             f_value /= OSCILLATOR_CONST
             fvalue_array[ii] = f_value
@@ -456,13 +514,16 @@ class colradlumo_calc:
                 ion_density = populations[lower-1] * fraction_override * self.density[density_index]
             else:
                 ion_density = populations[lower-1] * num_ions / volume 
+            
+            #print('hello',ion_density,ion_density/populations[lower-1])
+                
             factor = f_value * self.wl_vac_ang_matrix[upper-1,lower-1] * 1e-8 * time_exp_cgs * ion_density * correction 
             optical_depth[ii] *= factor
             
             wlcm = self.wl_vac_ang_matrix[upper-1,lower-1] * 1e-8 
             eightpi = 8.0 * np.pi 
             test = self.avalues[upper-1,lower-1] * (wlcm**3) * time_exp_cgs * ion_density * self.statistical_weights[upper-1] * correction/ (eightpi*self.statistical_weights[lower-1])
-            #print(test,optical_depth[ii])
+            #print(test,optical_depth[ii],lower,upper,populations[lower-1],populations[upper-1])
             #optical_depth_test[ii] = (self.wl_air_nm[ii]*1e-7)**3 * eps*self.avalues[upper-1,lower-1] * 0.5 * populations[lower-1]*(self.statistical_weights[upper-1]/self.statistical_weights[lower-1] - populations[upper-1]/populations[lower-1])*time_exp_cgs *num_ions/volume
             #print(optical_depth[ii],optical_depth_test[ii])
             upper_j   = self.angular_momenta[upper-1]
@@ -499,6 +560,8 @@ class colradlumo_calc:
 
         self.sobolov = optical_depth
 
+        print(populations[0],populations[3],self.escape_prob[2],self.avalue_save[4-1,1-1])
+        
         if printing:
             print(header)
             for ii in range(0,1000):

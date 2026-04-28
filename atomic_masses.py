@@ -1,3 +1,8 @@
+#This module pertains to the average nuclear masses of atomic elements
+#It also has a conversion from charge to the corresponding roman number
+#And extraction of the atomic number from the adf04 file.
+
+
 #select ion element from adf04 file.
 def getAtomicNumber(desired_element):
     for (ii,element) in enumerate(elements):
