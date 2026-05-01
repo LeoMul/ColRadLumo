@@ -12,12 +12,10 @@ class spectrum:
                wlMax = 5000,
                wlMin = 500,
                wlNum = 1000,
-               ionFraction = []
+               ionFraction = [],
+               useSobolov = False
                ):
     
-        #beta_22 = 0.04
-        #beta_20 = 0.04
-        #beta_45 = 0.07
         self.wlMin = wlMin 
         self.wlMax = wlMax 
      
@@ -35,9 +33,14 @@ class spectrum:
         colRadLumo_classes = []
 
         for ii,thisfile in enumerate(listOfadf04Files):
+            
             thismodel = colradlumo_calc(thisfile,
                                         np.array([central_density]),
                                         np.array([central_temp]))
+            
+            if useSobolov:
+                thismodel.convergeOpacity(central_temp,central_density,29,0.1,1e-3,False,False,0.5)
+            
             thismodel.scale_lumo_by_ion_mass(np.array([1e0]))
             bs = thismodel.line_broadening_lumo_density_fwhm(
                 listOfVelocities[ii],wavelengths,central_temp,central_density
