@@ -33,7 +33,7 @@ compare with the imposed electron density.
 Need to check that all of the units and input degradation is correct. 
 
 '''
-TOLERANCE = 1.E-3 
+TOLERANCE = 1.E-2
 MAXITER   = 20 
 class input:
     '''
@@ -48,8 +48,10 @@ class input:
                  velocityExpansionC = None,
                  timeSinceExplosionDays = None, 
                  selfConsistent = False,
-                 averageAtomicMass = 140,
-                 maxIonization     = 6 
+                 averageAtomicMass  = 140,
+                 maxIonization      = 6,
+                 depositionOverride = None,
+                 velocityMaxForEfficiency   = 0.1 
                  ):        
 
         #Boring transfer of memory. 
@@ -63,12 +65,14 @@ class input:
         self.averageAtomicMass          = averageAtomicMass
         self.maxIonization              = maxIonization
         self.selfConsistent             = selfConsistent
+        self.depositionOverride         = depositionOverride
+        self.velocityMaxForEfficiency   = velocityMaxForEfficiency
 class nonThermalBalance:
     '''
     Non thermal ionization balance class.
     '''
     
-    def __init__(self,input: input):
+    def __init__(self,input: input,outfile_suffix = ''):
         
         #Transfer memory we might need. 
         self.input                      = input
@@ -81,8 +85,11 @@ class nonThermalBalance:
         self.massesOfElements           = input.massesOfElements
         self.averageAtomicMass          = input.averageAtomicMass
         self.maxIonization              = input.maxIonization
+        self.depositionOverride         = input.depositionOverride
         
         self.numberOfElements = len(input.listOfAtomicNumbers)
+        
+        self.outfile = open(f'pynt-balance-{outfile_suffix}.out','w')
         
         #sanity checks on input data. 
         assert( len(input.massesOfElements)         == self.numberOfElements)
@@ -100,12 +107,16 @@ class nonThermalBalance:
         counter = 0 
         for ii in range(0,self.numberOfElements):
             for jj in range(0,self.input.maxIonization):
-                
+                axelrodrate = 10 * (jj+1)**2 * RRAxelrod(self.thermalElectronTemperature, jj+1)
                 if self.pathsOfRecombinationData[counter] == None:
-                    rate = RRAxelrod(self.thermalElectronTemperature, jj+1)
+                    rate = axelrodrate
+                    self.outfile.write(f'no recomb data  found for {self.listOfAtomicNumbers[ii],jj+1} - using Axelrod rate of {rate:10.2e}\n')
                 else:
                     data = np.loadtxt(self.pathsOfRecombinationData[counter])
                     rate = interp1d(data[:,0],data[:,1])(self.thermalElectronTemperature)
+                    self.outfile.write(f'recomb data  found for {self.listOfAtomicNumbers[ii],jj+1} - using rate of {rate:10.2e} = {rate/axelrodrate:10.2e} Axelrod\n')
+                
+                
                 
                 self.recombinationRatesCoefficient[jj,ii] = rate 
                 counter += 1 
@@ -123,13 +134,16 @@ class nonThermalBalance:
         self.initFraction = np.zeros_like(self.initBalance) 
         #Need total matter density for injection later.
         self.elementDensities = np.zeros(self.numberOfElements)
+        self.nparticles = np.zeros(self.numberOfElements)
+
+        self.expansion_volume =0.0
         for ii in range(0,self.numberOfElements):
-            self.elementDensities[ii] = elementDensity(
+            self.elementDensities[ii],self.nparticles [ii],self.expansion_volume = elementDensity(
                 self.listOfAtomicNumbers[ii],
                 self.massesOfElements[ii],
                 self.velocityExpansionC,
                 self.timeSinceExplosionDays
-            ).value
+            )
             
         self.elementDensityTotal = self.elementDensities.sum()
         
@@ -137,9 +151,11 @@ class nonThermalBalance:
         for ii in range(0,self.numberOfElements):
             self.initBalance [ii * stride : (ii+1) * stride ] = balancePerElement * self.elementDensities[ii]
             self.initFraction[ii * stride : (ii+1) * stride ] = balancePerElement
-        print(self.initBalance)
-        
-        print(self.elementDensities,self.elementDensities.sum())
+                
+        self.outfile.write(f'Total number densities: {self.elementDensityTotal:10.2e}\n',)
+        self.outfile.write('Element densities:\n')
+        for aa,zz in enumerate(self.listOfAtomicNumbers):
+            self.outfile.write(f'{zz:3} {self.elementDensities[aa]:10.2e}\n')
         
         self.balance = self.initBalance.copy()
         self.ionFraction = self.initFraction.copy()
@@ -150,12 +166,24 @@ class nonThermalBalance:
         Set deposition rate - eV /s / cm^3,
             =  Qdot * total matter density 
         '''
+        if self.depositionOverride is None:
+
+            self.heatingRate = heatingKasenBarnes(
+                self.timeSinceExplosionDays,
+                self.averageAtomicMass
+            )
+            self.thermalizationEfficiency = thermalizationKasenBarnes(self.timeSinceExplosionDays)
+            self.outfile.write(f'efficiency   of  {self.thermalizationEfficiency}\n')
+            self.outfile.write(f'using a heating rate of {self.heatingRate} \n')
+            self.depositionratedensity_ev  = self.heatingRate * self.elementDensityTotal * self.thermalizationEfficiency
+            try:
+                self.depositionratedensity_ev = self.depositionratedensity_ev.value 
+            except:
+                pass
+        else:
+            self.depositionratedensity_ev = self.depositionOverride 
+            self.outfile.write('Using an user-override deposition density of {:10.3}\n'.format(self.depositionOverride))
         
-        self.heatingRate = heatingKasenBarnes(
-            self.timeSinceExplosionDays,
-            self.averageAtomicMass
-        )
-        self.depositionratedensity_ev  = self.heatingRate * self.elementDensityTotal
         return None 
     
     def ionizationBalance(self):
@@ -164,24 +192,41 @@ class nonThermalBalance:
         self.ionFractionOld = self.ionFraction.copy() 
         
         stride = self.maxIonization
+        
+        self.actualElectronDensity = 0.0 
+        
         for aa,Z in enumerate(self.listOfAtomicNumbers):
             
             thisBalance = ionizationBalance(
                 self.ionizationRates[:,aa], 
-                self.imposedElectronDensity * self.recombinationRatesCoefficient[:,aa]
+                self.imposedElectronDensity * self.recombinationRatesCoefficient[:,aa],Z
                 )[0:self.maxIonization]
+            
             self.balance[aa * stride : (aa+1) * stride ]     = thisBalance * self.elementDensities[aa]
+            
+            self.actualElectronDensity += np.sum ( np.arange(0,self.maxIonization,1,dtype=int) * thisBalance * self.elementDensities[aa])
+            
             self.ionFraction[aa * stride : (aa+1) * stride ] = thisBalance 
 
-        print(self.ionFractionOld)
-        print(self.ionFraction)
-    
+        #print(self.ionFractionOld)
+        #print(self.ionFraction)
+        
+        self.outfile.write('Ionization iteration: \n')
+        self.outfile.write(f' Electrons contributed by the part of the gas is: mycalc: {self.actualElectronDensity:10.2e} pynt: {self.electronDensityPYNT:10.2e}\n')
+        
+        
+        
+        counter = 0 
+        for aa,atomicnumber in enumerate(self.listOfAtomicNumbers):
+            for ii in range(0,self.maxIonization):
+                self.outfile.write(f'{atomicnumber:3} {ii:2}+ {self.ionFraction[counter]:10.2e} {self.ionFractionOld[counter]:10.2e} \n')
+                counter += 1
         return None
     
     def checkConvergence(self):
         self.converged = True 
         
-        if np.any(np.abs(self.ionFraction - self.ionFractionOld) > TOLERANCE):
+        if np.any(np.abs(self.ionFraction - self.ionFractionOld)/self.ionFractionOld > TOLERANCE):
             self.converged = False
         
         return self.converged
@@ -200,20 +245,26 @@ class nonThermalBalance:
                 counter += 1
         
         #Pass this array to initialize the Spencer-Fano solver.
-        sf = pynonthermal.SpencerFanoSolver(emin_ev=1, emax_ev=3000, npts=2000, verbose=False)
+        sf = pynonthermal.SpencerFanoSolver(emin_ev=1, emax_ev=3000, npts=200, verbose=False)
         for Z, ion_stage, n_ion in ions:
             #print('debug:',Z,ion_stage,n_ion)
             sf.add_ionisation(Z, ion_stage, n_ion)
+            
+        self.outfile.write(f"Calling SpencerFano with: Edep = {self.depositionratedensity_ev:10.2e} eV/s/cm3.\n")
+        if self.depositionOverride is None:
+            self.outfile.write(f"                               = {self.thermalizationEfficiency:10.2e} * {self.heatingRate.value:10.2e} eV/s * {self.elementDensityTotal:10.2e} /cm3 \n")
+        else:
+            self.outfile.write(f"                               = user override.\n")
         
         #If the user wants their own density
         if self.imposedElectronDensity is not None:
-            sf.solve(depositionratedensity_ev = self.depositionratedensity_ev.value ,override_n_e=self.imposedElectronDensity)
+            sf.solve(depositionratedensity_ev = self.depositionratedensity_ev ,override_n_e=self.imposedElectronDensity)
         else:
-            sf.solve(depositionratedensity_ev = self.depositionratedensity_ev.value)
+            sf.solve(depositionratedensity_ev = self.depositionratedensity_ev)
 
         #Call to analysis - I don't know what this does but it seems necessary. 
         sf.analyse_ntspectrum()
-        
+        self.electronDensityPYNT = sf.calculate_free_electron_density()
         #Pass the calculated Ionization Rates back to the self class. 
         for aa in range(0,self.numberOfElements):
             for ii in range(0,self.input.maxIonization):
@@ -224,20 +275,33 @@ class nonThermalBalance:
         return None 
 
 
-    def writeOutIonizationRates(self):
+    def writeOutBalanceAndRates(self,fileSuffix=''):
         '''
         Writes out the non-thermal ionization rates calculated by this code.
         '''
-        file = open('nonThermalRates.dat','w')
+        file = open(f'pynt-balance-{fileSuffix}.dat','w')
         
-        writeFormat = '{:>3}, {:4}, {:>2}+->{:>2}+, {:12.6e}\n'
+        header = '{:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e}\n'.format(
+                                    self.thermalElectronTemperature,
+                                    self.imposedElectronDensity,
+                                    self.actualElectronDensity,
+                                    self.timeSinceExplosionDays,
+                                    self.velocityExpansionC
+                                    )
+        file.write(header)
         
+        writeFormat = '{:>3}, {:4}, {:2}{:2}, {:>2}+->{:>2}+, {:12.6e}, {:12.6e}, {:12.6e}, {:12.6e}\n'
+        counter = 0
         for aa,atomicNumber in enumerate(self.listOfAtomicNumbers):
             
             for ii in range(0,self.maxIonization):
                 file.write(writeFormat.format(
-                  str(periodictable.elements[atomicNumber]),atomicNumber,ii,ii+1,self.ionizationRates[ii,aa]  
+                  str(periodictable.elements[atomicNumber]),
+                  atomicNumber,
+                  atomicNumber,atomicNumber-ii,ii,ii+1,self.ionizationRates[ii,aa],
+                  self.recombinationRatesCoefficient[ii,aa]*self.imposedElectronDensity,self.ionFraction[counter],self.ionFraction[counter] * self.massesOfElements[aa]
                 ))
+                counter += 1 
         
         file.close()
         
@@ -264,7 +328,7 @@ def elementDensity(elementNumber,ion_mass_solar,velocity_c,explosion_time_days):
     
     #print(nparticles,v,t,expansion_volume,ionDensity)
     
-    return ionDensity
+    return ionDensity.value, nparticles.value,expansion_volume.value
 
 def heatingKasenBarnes(time_exp_days,averageAtomMass = 140,powerLaw = -1.3):
     '''
@@ -277,8 +341,9 @@ def heatingKasenBarnes(time_exp_days,averageAtomMass = 140,powerLaw = -1.3):
     This function converts this to the work per ion, assuming an average atomic mass of  
     averageAtomMass nuclear units (140 by default).
     
-    Using <A> = 140 with t = 1d, , this returns a work per ion of ~ 0.145 eV/s/ion,
-    which is close to the number that Luke Shingles gave me. 
+    Using <A> = 140 with t = 1d, , this returns a work per ion of ~ 1.45 eV/s/ion,
+    which is 10 * the number that Luke Shingles gave me.. - but need to multiply
+    by a thermalization efficiency.
     '''
 
     const = 1e10 * u.erg / (u.g * u.s) #from 
@@ -286,10 +351,25 @@ def heatingKasenBarnes(time_exp_days,averageAtomMass = 140,powerLaw = -1.3):
     averageAtomicMass = (averageAtomMass * u.u).to('g')
     
     heating  = (averageAtomicMass * const).to('eV/s')
-        
-    return heating * time_exp_days ** powerLaw
+    
+    return heating * (time_exp_days ** powerLaw)
 
-def ionizationBalance(ionization_rates, recombination_rates):
+def thermalizationKasenBarnes(time_exp_days,
+                              ejectaMassSolar = 0.05,
+                              eta = 1.0,
+                              velocity_max_c=0.1,
+                              temporalindex = 1.5,
+                              fastelectron_parition = 0.2):
+    
+    ejectaMassSolar = ejectaMassSolar
+    
+    t_e = 15.0 * (eta * ejectaMassSolar / 0.01)**0.667 * (velocity_max_c / 0.2) **-2
+    
+    
+    return fastelectron_parition * (1.0 + time_exp_days/t_e) ** (-1. * temporalindex)
+
+
+def ionizationBalance(ionization_rates, recombination_rates,atomicNumber):
     ''' 
     Coronal ionization balance. 
     I.e - only consider:
@@ -299,12 +379,38 @@ def ionizationBalance(ionization_rates, recombination_rates):
     ionization_rates   [i] = rate of ionization    from i   to i+1 
     recombination_rates[i] = rate of recombination from i+1 to i    
     
+    pads out the balance, by assuming the ionization decreases 
+    geometrically from the last explicitly calculated and that the 
+    recombination increases geometrically. 
+    
+    assuming a factor of 2 drop off/increase - the balance drops off with factor 4.
     '''    
     populations = np.zeros(len(ionization_rates)+1)
     populations[0] = 1.0
     for z in range(0,len(ionization_rates)):
         populations[z+1] = populations[z] * ionization_rates[z] / recombination_rates[z]
-    return populations / populations.sum()
+    
+    pp = populations[-1]
+    norm = populations.sum()
+    current = pp 
+    totalarray = [*populations]
+    for z in range(len(ionization_rates),atomicNumber):
+        current = current * 0.25 
+        norm += current 
+        totalarray.append(current)
+    
+    totalarray = np.array(totalarray)
+    totalarray /= norm
+    populations = populations / norm
+    
+    #self.outfile.write(f'Ion population: Z = {atomicNumber} {totalarray[:]}\n')
+    
+    #if populations[-1] > 1e-4:
+    #    import sys
+    #    print(f'Populations not converged for {atomicNumber} ', totalarray[:]) 
+    #    sys.exit()    
+        
+    return populations
 
 def RRAxelrod(temp_kelvin,i):
     #i = ionization
@@ -348,23 +454,25 @@ def main():
         with open(args.json, 'r') as j:
             contents = json.loads(j.read())
         thisInput = input(**contents)
-        ntb = nonThermalBalance(thisInput)
+        ntb = nonThermalBalance(thisInput,outfile_suffix=args.json)
         
-        print('Iter 1')
+        ntb.outfile.write('Iter 1\n')
         ntb.runSpencerFano()
         ntb.ionizationBalance()
         if ntb.input.selfConsistent:
             for ii in range(0,MAXITER):
             
-                print(f'Iter {ii+2}')
+                ntb.outfile.write(f'Iter {ii+2}\n')
                 ntb.runSpencerFano()
                 ntb.ionizationBalance()
                 ntb.checkConvergence()
 
                 if ntb.converged:
                     break
-                
-        ntb.writeOutIonizationRates()
+        
+        
+        
+        ntb.writeOutBalanceAndRates(fileSuffix=args.json)
         
     return 0 
 
