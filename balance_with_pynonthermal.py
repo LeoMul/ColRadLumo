@@ -86,7 +86,7 @@ class nonThermalBalance:
         self.averageAtomicMass          = input.averageAtomicMass
         self.maxIonization              = input.maxIonization
         self.depositionOverride         = input.depositionOverride
-        
+        self.velocityMaxForEfficiency   = input.velocityMaxForEfficiency
         self.numberOfElements = len(input.listOfAtomicNumbers)
         
         self.outfile = open(f'pynt-balance-{outfile_suffix}.out','w')
@@ -172,7 +172,7 @@ class nonThermalBalance:
                 self.timeSinceExplosionDays,
                 self.averageAtomicMass
             )
-            self.thermalizationEfficiency = thermalizationKasenBarnes(self.timeSinceExplosionDays)
+            self.thermalizationEfficiency = thermalizationKasenBarnes(self.timeSinceExplosionDays,velocity_max_c=self.velocityMaxForEfficiency)
             self.outfile.write(f'efficiency   of  {self.thermalizationEfficiency}\n')
             self.outfile.write(f'using a heating rate of {self.heatingRate} \n')
             self.depositionratedensity_ev  = self.heatingRate * self.elementDensityTotal * self.thermalizationEfficiency
