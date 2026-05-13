@@ -20,7 +20,10 @@ class spectrum:
                wlNum = 1000,
                ionFraction = [],
                useSobolov = False,
-               timeSinceExplosionDays =0.0 
+               timeSinceExplosionDays =0.0,
+               dep  = None,
+               rho  = None,
+               masstotal = None
                ):
     
         self.wlMin = wlMin 
@@ -34,6 +37,9 @@ class spectrum:
         self.central_density = central_density
         self.useSobolov      = useSobolov
         self.timeSinceExplosionDays = timeSinceExplosionDays
+        self.dep = dep
+        self.rho = rho 
+        self.masstotal = masstotal
         elementsChargeRoman = [] 
         elementsChargePlus = []
         nWavelengths=  wlNum
@@ -41,6 +47,7 @@ class spectrum:
         spectra = np.zeros([numSpec,nWavelengths])
         wavelengths = np.linspace(wlMin,wlMax,nWavelengths)
         colRadLumo_classes = []
+        self.continuum = np.zeros_like(wavelengths)
 
         for ii,thisfile in enumerate(listOfadf04Files):
             
@@ -218,12 +225,15 @@ class spectrum:
 
         if plotVFI:
             vfiwl, vfilum = getVFI()
-            ax.step(vfiwl, vfilum * 1e-35, 'k', linewidth=0.2, where='mid', alpha=0.3)
+            vfi_handle = ax.step(vfiwl, vfilum * 1e-35, 'k', linewidth=0.2, where='mid', alpha=0.3,label='AT2023vfi')[0]
 
         # 4. Calculate the "Excess" Spectrum
         excess_spectrum = np.zeros_like(self.total)
         for idx in excess_indices:
             excess_spectrum += self.spectra[idx, :] 
+                # Plot total sum line
+        total_handle, = ax.plot(self.wavelengths, (self.total+excess_spectrum) * 1e-35, color='k', linewidth=1, label='Total')
+        cont_handle, = ax.plot(self.wavelengths, (self.continuum) * 1e-35,'k--', linewidth=0.5, label='Continuum')
         
         # 5. Plotting the Striped Excess Layer
         # 'hatch' creates the stripes. 'edgecolor' sets the stripe color.
@@ -274,8 +284,7 @@ class spectrum:
             line_handle, = ax.plot([], [], color=color, label=full_label, linewidth=1.5)
             handle_dict[ii] = line_handle
 
-        # Plot total sum line
-        total_handle, = ax.plot(self.wavelengths, (self.total+excess_spectrum) * 1e-35, color='k', linewidth=1, label='Total')
+
 
         # 7. Limits & Legend
         ax.set_xlim(xlimitsPlot)
@@ -286,7 +295,11 @@ class spectrum:
         if legend:
             sorted_ii = sorted(handle_dict.keys())
             # Final Order: Total -> Elements (Original Array Order) -> Striped Excess
-            final_handles = [total_handle] + [handle_dict[k] for k in sorted_ii] + [excess_handle]
+            final_handles = [total_handle]+[cont_handle]
+            if plotVFI:
+                final_handles = final_handles + [vfi_handle]
+            final_handles = final_handles + [handle_dict[k] for k in sorted_ii] + [excess_handle]
+            
             final_labels = [h.get_label() for h in final_handles]
 
             ax.legend(final_handles, final_labels, loc="center left", 
@@ -307,7 +320,37 @@ class spectrum:
                     verticalalignment='top', 
                     horizontalalignment='left',
                     fontsize=10)
-                        
+            if self.dep is not None:
+                depStringVoodoo = '{:8.2e}'.format(self.dep)
+                exphack = int(depStringVoodoo[-1])
+                deplabel = fr"$\epsilon_d = $ {depStringVoodoo[:4]} $\times 10^{{{exphack}}}$ eV s$^{{-1}}$ cm$^{{-3}}$"
+                ax.text(1.08, 0.12, deplabel, 
+                    transform=ax.transAxes, 
+                    verticalalignment='top', 
+                    horizontalalignment='left',
+                    fontsize=10)
+                
+                depStringVoodoo = '{:8.2e}'.format(self.rho)
+                
+                exphack = int(depStringVoodoo[5:])
+                
+                deplabel = fr"$\rho = $ {depStringVoodoo[:4]} $\times 10^{{{exphack}}}$ g cm$^{{-3}}$"
+                ax.text(1.08, 0.085, deplabel, 
+                    transform=ax.transAxes, 
+                    verticalalignment='top', 
+                    horizontalalignment='left',
+                    fontsize=10)
+                depStringVoodoo = '{:8.2e}'.format(self.masstotal)
+                
+                exphack = int(depStringVoodoo[5:])
+                
+                deplabel = fr"$M = $ {depStringVoodoo[:4]} $\times 10^{{{exphack}}} \mathrm{{ M}}_\odot$"
+                ax.text(1.08, 0.050, deplabel, 
+                    transform=ax.transAxes, 
+                    verticalalignment='top', 
+                    horizontalalignment='left',
+                    fontsize=10)
+                
         return fig, ax
 
 def getVFI():
@@ -397,7 +440,9 @@ def spectrumFromNonThermalOutput(nonthermaloutputpath: str,
     actualElectronDensity      = header[2]
     timeSinceExplosionDays     = header[3]
     velocityExpansionC         = header[4]
-    
+    depositionratedensity_ev   = header[5]
+    rho                        = header[6]
+    masstotal                  = header[7]
     density = imposedElectronDensity 
     #if the user let pynt calculate an electron density, use that instead.
     if density == 0: 
@@ -429,7 +474,10 @@ def spectrumFromNonThermalOutput(nonthermaloutputpath: str,
         wlMin=wlmin,
         wlNum=nwavelengths,
         useSobolov = useSobolov,
-        timeSinceExplosionDays = timeSinceExplosionDays
+        timeSinceExplosionDays = timeSinceExplosionDays,
+        dep=depositionratedensity_ev,
+        rho = rho,
+        masstotal=masstotal
     )
     
     return thisSpectrum
