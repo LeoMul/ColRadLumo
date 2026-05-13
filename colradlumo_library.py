@@ -325,7 +325,9 @@ class colradlumo_calc:
         tracker = self.tracker
         tracker[iter%4] = sumavalues
 
-
+        import sys
+        assert (True == False),'need to implement new opacity iteration'
+        sys.exit()
         self.esc_old = self.escape_prob
         self.avalue_sum_check = abs( self.suma_old / self.suma_new -1.0)
         if ( self.avalue_sum_check < 0.001):
@@ -594,7 +596,7 @@ class colradlumo_calc:
             if (wavelength != 0.0) and (wavelength<1000*wavelength_array[-1]):
                 broadened_spec += self.scaled_lumo_ergs[index,temp_index,density_index] * gaussian_kernel_lumo_density_new(wavelength,velocity_fwhm_cunits,wavelength_array)
                 #print(self.scaled_lumo_ergs[0],wavelength)
-
+        self.broadened_spec = broadened_spec
         return broadened_spec
 
 
