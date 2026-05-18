@@ -8,7 +8,7 @@ import sys
 import os 
 import json 
 import argparse
-
+#get_eff_ionpot
 ''''
 Charge state balance for a given set of elements.
 
@@ -43,7 +43,8 @@ class input:
                  pathsOfRecombinationData=[],
                  massesOfElements=[],
                  thermalElectronTemperature = None,
-                 imposedElectronDensity    = None,
+                 imposedElectronDensitySF    = None,
+                 imposedElectronDensityRecombination    = None,
                  velocityExpansionC = None,
                  timeSinceExplosionDays = None, 
                  selfConsistent = False,
@@ -59,7 +60,8 @@ class input:
         self.massesOfElements           = massesOfElements
         self.pathsOfRecombinationData   = pathsOfRecombinationData
         self.thermalElectronTemperature = thermalElectronTemperature
-        self.imposedElectronDensity     = imposedElectronDensity
+        self.imposedElectronDensitySF   = imposedElectronDensitySF
+        self.imposedElectronDensityRecombination = imposedElectronDensityRecombination
         self.velocityExpansionC         = velocityExpansionC
         self.timeSinceExplosionDays     = timeSinceExplosionDays
         self.averageAtomicMass          = averageAtomicMass
@@ -81,7 +83,7 @@ class nonThermalBalance:
         self.listOfAtomicNumbers        = input.listOfAtomicNumbers
         self.pathsOfRecombinationData   = input.pathsOfRecombinationData
         self.thermalElectronTemperature = input.thermalElectronTemperature
-        self.imposedElectronDensity     = input.imposedElectronDensity
+        self.imposedElectronDensitySF     = input.imposedElectronDensitySF
         self.velocityExpansionC         = input.velocityExpansionC
         self.timeSinceExplosionDays     = input.timeSinceExplosionDays
         self.massesOfElements           = input.massesOfElements
@@ -91,12 +93,13 @@ class nonThermalBalance:
         self.velocityMaxForEfficiency   = input.velocityMaxForEfficiency
         self.numberOfElements = len(input.listOfAtomicNumbers)
         self.depositionMode             = input.depositionMode
+        self.imposedElectronDensityRecombination = input.imposedElectronDensityRecombination
         self.outfile = open(f'pynt-balance-{outfile_suffix}.out','w')
         
         #sanity checks on input data. 
         assert( len(input.massesOfElements)         == self.numberOfElements)
         assert( len(input.pathsOfRecombinationData) == self.numberOfElements * input.maxIonization)
-        self.electronDensity = self.imposedElectronDensity
+        self.electronDensity = self.imposedElectronDensitySF
         self._setRecombinationRates()
         self._setInitialIonizationBalance()        
         self._setDepositionRateDensity()
@@ -245,7 +248,7 @@ class nonThermalBalance:
             
             thisBalance = ionizationBalance(
                 self.ionizationRates[:,aa], 
-                self.electronDensity * self.recombinationRatesCoefficient[:,aa],Z
+                self.electronDensityForIonization * self.recombinationRatesCoefficient[:,aa],Z
                 )[0:self.maxIonization]
             
             self.balance[aa * stride : (aa+1) * stride ]     = thisBalance * self.elementNumberDensities[aa]
@@ -260,11 +263,15 @@ class nonThermalBalance:
         #Calculate a new Ionization balance.
         self.balanceOld = self.balance.copy()
         self.ionFractionOld = self.ionFraction.copy() 
-        self.outfile.write(f'Calculating Ionization Balance, using initial electron density {self.electronDensity:10.2e}\n')
-        self.electronDensityForIonization = self.electronDensity
+        if self.imposedElectronDensityRecombination is not None:
+            self.electronDensityForIonization = self.imposedElectronDensityRecombination
+        else:
+            self.electronDensityForIonization = self.electronDensity
+        self.outfile.write(f'Calculating Ionization Balance, using initial electron density {self.electronDensityForIonization:10.2e}\n')
+
         self.ionIter()
         
-        #if self.imposedElectronDensity is None:
+        #if self.imposedElectronDensitySF is None:
         #    counter = 0
         #    for _ in range(0,MAXITER):
         #        conv = (self.electronDensityForIonization - self.actualElectronDensity) / self.electronDensityForIonization
@@ -277,10 +284,10 @@ class nonThermalBalance:
         #        counter += 1
         #    self.outfile.write(f'    Self consistency on electron density converged to {self.electronDensityForIonization:10.2e} in {counter:3} iterations.\n')
         
-        self.electronDensity = self.electronDensityForIonization
+        #self.electronDensity = self.electronDensityForIonization
         self.outfile.write('Ionization iteration: \n')
         self.outfile.write(f' Electrons contributed by the part of the gas is: mycalc (afterThisIter): {self.actualElectronDensity:10.2e} pynt (before): {self.electronDensityPYNT:10.2e}\n')
-        
+        self.outfile.write(' The electron fraction x_e = {:10.2e}\n'.format(self.sf.get_n_e() / self.elementNumberDensityTotal))
         
         
         counter = 0 
@@ -288,7 +295,7 @@ class nonThermalBalance:
         for aa,atomicnumber in enumerate(self.listOfAtomicNumbers):
             for ii in range(0,self.maxIonization):
                 cc = (self.ionFractionOld[counter]-self.ionFraction[counter])/self.ionFractionOld[counter]
-                self.outfile.write(f'{atomicnumber:3} {ii:2}+  {self.ionFractionOld[counter]:10.2e} {self.ionFraction[counter]:10.2e} {cc:10.2e}\n')
+                self.outfile.write(f'{atomicnumber:3} {ii:2}+  {self.ionFractionOld[counter]:10.2e} {self.ionFraction[counter]:10.2e} {cc:10.2e} {self.sf.get_eff_ionpot(atomicnumber,ii+1):10.2e}\n')
                 counter += 1
         return None
     
@@ -315,10 +322,10 @@ class nonThermalBalance:
                 counter += 1
         
         #Pass this array to initialize the Spencer-Fano solver.
-        sf = pynonthermal.SpencerFanoSolver(emin_ev=1, emax_ev=3000, npts=200, verbose=False)
+        self.sf = pynonthermal.SpencerFanoSolver(emin_ev=1, emax_ev=3000, npts=400, verbose=True)
         for Z, ion_stage, n_ion in ions:
             #print('debug:',Z,ion_stage,n_ion)
-            sf.add_ionisation(Z, ion_stage, n_ion)
+            self.sf.add_ionisation(Z, ion_stage, n_ion)
             
         self.outfile.write(f"Calling SpencerFano with: Edep = {self.depositionratedensity_ev:10.2e} eV/s/cm3.\n")
         
@@ -326,20 +333,23 @@ class nonThermalBalance:
             self.outfile.write(f"                               = {self.thermalizationEfficiency:10.2e} * {self.heatingRate.value:10.2e} eV/s * {self.elementNumberDensityTotal:10.2e} /cm3 \n")
         
         #If the user wants their own density
-        if self.imposedElectronDensity is not None:
-            sf.solve(depositionratedensity_ev = self.depositionratedensity_ev ,override_n_e=self.imposedElectronDensity)
+        if self.imposedElectronDensitySF is not None:
+            self.sf.solve(depositionratedensity_ev = self.depositionratedensity_ev ,override_n_e=self.imposedElectronDensitySF)
         else:
-            sf.solve(depositionratedensity_ev = self.depositionratedensity_ev)
-            self.electronDensity = sf.calculate_free_electron_density()
+            self.sf.solve(depositionratedensity_ev = self.depositionratedensity_ev)
+            self.electronDensity = self.sf.calculate_free_electron_density()
 
         #Call to analysis - I don't know what this does but it seems necessary. 
-        sf.analyse_ntspectrum()
-        self.electronDensityPYNT = sf.calculate_free_electron_density()
+        self.sf.analyse_ntspectrum()
+        self.electronDensityPYNT = self.sf.calculate_free_electron_density()
+        
+        self.engrid = self.sf.engrid
+        self.yvec   = self.sf.yvec
         
         #Pass the calculated Ionization Rates back to the self class. 
         for aa in range(0,self.numberOfElements):
             for ii in range(0,self.input.maxIonization):
-                self.ionizationRates[ii,aa] = sf.get_ionisation_ratecoeff(self.listOfAtomicNumbers[aa], ii+1)
+                self.ionizationRates[ii,aa] = self.sf.get_ionisation_ratecoeff(self.listOfAtomicNumbers[aa], ii+1)
         
         
         
@@ -351,18 +361,24 @@ class nonThermalBalance:
         Writes out the non-thermal ionization rates calculated by this code.
         '''
         file = open(f'pynt-balance-{fileSuffix}.dat','w')
-        if self.imposedElectronDensity is None:
-            self.imposedElectronDensity = 0.0
-        header = '{:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e}\n'.format(
+        if self.imposedElectronDensitySF is None:
+            self.imposedElectronDensitySF = 0.0
+        if self.imposedElectronDensityRecombination = 0.0:
+            self.imposedElectronDensityRecombination = 0.0
+        header = '{:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e}\n'.format(
                                     self.thermalElectronTemperature,
-                                    self.imposedElectronDensity,
+                                    self.imposedElectronDensitySF,
+                                    self.imposedElectronDensityRecombination,
                                     self.actualElectronDensity,
                                     self.timeSinceExplosionDays,
-                                    self.velocityExpansionC
+                                    self.velocityExpansionC,
+                                    self.depositionratedensity_ev,
+                                    self.elementMassDensityTotal,
+                                    sum(self.massesOfElements)
                                     )
         file.write(header)
         
-        writeFormat = '{:>3}, {:4}, {:2}{:2}, {:>2}+->{:>2}+, {:12.6e}, {:12.6e}, {:12.6e}, {:12.6e}\n'
+        writeFormat = '{:>3}, {:4}, {:2}{:2}, {:>2}+->{:>2}+, {:12.6e}, {:12.6e}, {:12.6e}, {:12.6e}, {:12.6e}\n'
         counter = 0
         for aa,atomicNumber in enumerate(self.listOfAtomicNumbers):
             
@@ -370,14 +386,22 @@ class nonThermalBalance:
                 file.write(writeFormat.format(
                   str(periodictable.elements[atomicNumber]),
                   atomicNumber,
-                  atomicNumber,atomicNumber-ii,ii,ii+1,self.ionizationRates[ii,aa],
-                  self.recombinationRatesCoefficient[ii,aa]*self.imposedElectronDensity,self.ionFraction[counter],self.ionFraction[counter] * self.massesOfElements[aa]
+                  atomicNumber,atomicNumber-ii,ii,ii+1,self.sf.get_eff_ionpot(atomicNumber,ii+1),self.ionizationRates[ii,aa],
+                  self.recombinationRatesCoefficient[ii,aa]*self.electronDensityForIonization,self.ionFraction[counter],self.ionFraction[counter] * self.massesOfElements[aa]
                 ))
                 counter += 1 
         
         file.close()
         
+        file = open(f'pynt-deg-{fileSuffix}.dat','w')
         
+        for ii in range(0,len(self.yvec)):
+            file.write('{:14.6e} {:14.6e}\n'.format(
+                self.engrid[ii],
+                self.yvec  [ii]
+            ))
+        
+        file.close()
         
         return None 
         
@@ -548,7 +572,12 @@ def main():
                 if len(nehistory) == 3: 
                     #Aitken Jump: 
                     n0,n1,n2 = nehistory[-3:]
+                    
                     dd = n2 - 2.0 * n1 + n0 
+                    if dd == 0: 
+                        print(n2,n1,n0)
+                        import sys 
+                        sys.exit()
                     neNew = n2 - (n2 -n1)**2 / dd 
                     ntb.electronDensity = neNew
                     ntb.outfile.write(f'Aitken jump {n0:10.2e}{n1:10.2e}{n2:10.2e}{neNew:10.2e}\n')

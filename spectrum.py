@@ -23,7 +23,8 @@ class spectrum:
                timeSinceExplosionDays =0.0,
                dep  = None,
                rho  = None,
-               masstotal = None
+               masstotal = None,
+               savecrmfiles = False
                ):
     
         self.wlMin = wlMin 
@@ -95,6 +96,13 @@ class spectrum:
             elementsChargePlus.append(elementChargePlusString)
 
             colRadLumo_classes.append(None)
+            
+            if savecrmfiles:
+                if charge_plus != 99:
+                    os.system('mv pecData pecData{}'.format(elementChargePlusString))
+                    os.system('mv popData popData{}'.format(elementChargePlusString))
+                    os.system('mv crm.out crm.out{}'.format(elementChargePlusString))
+                    os.system('mv spectrum spectrum{}'.format(elementChargePlusString))
 
         self.elementsChargeRoman = elementsChargeRoman 
         self.elementsChargePlus  = elementsChargePlus
@@ -386,8 +394,8 @@ mycolordict = {
     "As I"  :  (1.00000000, 0.49803922, 0.05490196, 1.00000000),
     "As II" :  (0.58039216, 0.40392157, 0.74117647, 1.00000000),
     "As III":  (1.00000000, 0.59607843, 0.58823529, 1.00000000),
-    "Se I"  :  (0.85882353, 0.85882353, 0.55294118, 1.00000000),
-    "Se II" :  (0.83921569, 0.15294118, 0.15686275, 1.00000000),
+    "Se I"  :  (0.83921569, 0.15294118, 0.15686275, 1.00000000),
+    "Se II" :  (0.85882353, 0.85882353, 0.55294118, 1.00000000),
     "Se III":  (0.73725490, 0.74117647, 0.13333333, 1.00000000),
     "Se IV" :  (1.00000000, 0.73333333, 0.47058824, 1.00000000),
     "Br I"  :  (0.96862745, 0.71372549, 0.82352941, 1.00000000),
@@ -432,21 +440,27 @@ def spectrumFromNonThermalOutput(nonthermaloutputpath: str,
                                  wlmin = 100,
                                  wlmax = 5000,
                                  nwavelengths=2000,
-                                 useSobolov = False):
+                                 useSobolov = False,savecrmfiles=False,
+                                 electronDensityOveride = None):
     
     header = np.loadtxt(nonthermaloutputpath,max_rows=1)
     thermalElectronTemperature = header[0]
-    imposedElectronDensity     = header[1]
-    actualElectronDensity      = header[2]
-    timeSinceExplosionDays     = header[3]
-    velocityExpansionC         = header[4]
-    depositionratedensity_ev   = header[5]
-    rho                        = header[6]
-    masstotal                  = header[7]
-    density = imposedElectronDensity 
+    imposedElectronDensitySF   = header[1]
+    imposedElectronDensityRec  = header[2]
+    actualElectronDensity      = header[3]
+    timeSinceExplosionDays     = header[4]
+    velocityExpansionC         = header[5]
+    depositionratedensity_ev   = header[6]
+    rho                        = header[7]
+    masstotal                  = header[8]
+    
+    density = imposedElectronDensityRec 
     #if the user let pynt calculate an electron density, use that instead.
     if density == 0: 
         density = actualElectronDensity
+    
+    if electronDensityOveride is not None:
+        density = electronDensityOveride
     
     nonthermaloutput = np.loadtxt(nonthermaloutputpath,usecols=(2,-1),dtype=str,delimiter=',',skiprows=1)
 
@@ -477,7 +491,8 @@ def spectrumFromNonThermalOutput(nonthermaloutputpath: str,
         timeSinceExplosionDays = timeSinceExplosionDays,
         dep=depositionratedensity_ev,
         rho = rho,
-        masstotal=masstotal
+        masstotal=masstotal,
+        savecrmfiles=savecrmfiles
     )
     
     return thisSpectrum
