@@ -21,6 +21,7 @@ Self consistent iteration - optional.
 
 Current todo's: 
 
+Need to fix the electorn density malarky - e.g what is ued for ionization balancr and what is used for SF.
 
 Possibly extend some index's by one - I think we can squeeze out an extra 
 ion for the ionization balance. Its probably fine the way it is. 
@@ -29,6 +30,8 @@ Print out the degradation spectrum in each case.
 Print out the total electron density from the ionization balance
 
 Need to check that all of the units and input degradation is correct. 
+
+
 
 '''
 TOLERANCE = 5.E-2
@@ -220,6 +223,7 @@ class nonThermalBalance:
         from scipy.interpolate import interp1d
         interp = interp1d(logdays,logdep_per_g)
         self.depPerGram = 10 ** interp(np.log10(self.timeSinceExplosionDays))
+        print(self.depPerGram,self.elementMassDensityTotal)
         self.depositionratedensity_ev = self.depPerGram * self.elementMassDensityTotal
         return None 
     
@@ -363,9 +367,9 @@ class nonThermalBalance:
         file = open(f'pynt-balance-{fileSuffix}.dat','w')
         if self.imposedElectronDensitySF is None:
             self.imposedElectronDensitySF = 0.0
-        if self.imposedElectronDensityRecombination = 0.0:
+        if self.imposedElectronDensityRecombination == 0.0:
             self.imposedElectronDensityRecombination = 0.0
-        header = '{:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e}\n'.format(
+        header = '{:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e} {:13.7e}\n'.format(
                                     self.thermalElectronTemperature,
                                     self.imposedElectronDensitySF,
                                     self.imposedElectronDensityRecombination,
