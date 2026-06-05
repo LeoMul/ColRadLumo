@@ -52,7 +52,7 @@ class input:
                  timeSinceExplosionDays = None, 
                  selfConsistent = False,
                  averageAtomicMass  = 140,
-                 maxIonization      = 6,
+                 maxIonizationPlus      = 6,
                  depositionOverride = None,
                  velocityMaxForEfficiency   = 0.1,
                  depositionMode = "KasenBarnes"
@@ -68,7 +68,7 @@ class input:
         self.velocityExpansionC         = velocityExpansionC
         self.timeSinceExplosionDays     = timeSinceExplosionDays
         self.averageAtomicMass          = averageAtomicMass
-        self.maxIonization              = maxIonization
+        self.maxIonizationPlus              = maxIonizationPlus
         self.selfConsistent             = selfConsistent
         self.depositionOverride         = depositionOverride
         self.velocityMaxForEfficiency   = velocityMaxForEfficiency
@@ -91,7 +91,7 @@ class nonThermalBalance:
         self.timeSinceExplosionDays     = input.timeSinceExplosionDays
         self.massesOfElements           = input.massesOfElements
         self.averageAtomicMass          = input.averageAtomicMass
-        self.maxIonization              = input.maxIonization
+        self.maxIonizationPlus              = input.maxIonizationPlus
         self.depositionOverride         = input.depositionOverride
         self.velocityMaxForEfficiency   = input.velocityMaxForEfficiency
         self.numberOfElements = len(input.listOfAtomicNumbers)
@@ -99,9 +99,18 @@ class nonThermalBalance:
         self.imposedElectronDensityRecombination = input.imposedElectronDensityRecombination
         self.outfile = open(f'pynt-balance-{outfile_suffix}.out','w')
         
+        
+        #i.e if 1+ is our max ion, we have 0+ and 1+ included in the model.
+        #but this is only ONE reaction we need to keep track of.
+        self.numberIonStagesPerElement = self.maxIonizationPlus + 1 
+        
+        self.numRatesPerElement = self.maxIonizationPlus 
+        
+        
+        
         #sanity checks on input data. 
         assert( len(input.massesOfElements)         == self.numberOfElements)
-        assert( len(input.pathsOfRecombinationData) == self.numberOfElements * input.maxIonization)
+        assert( len(input.pathsOfRecombinationData) == self.numberOfElements * input.maxIonizationPlus)
         self.electronDensity = self.imposedElectronDensitySF
         self._setRecombinationRates()
         self._setInitialIonizationBalance()        
@@ -109,13 +118,13 @@ class nonThermalBalance:
         
     def _setRecombinationRates(self):
         #Store an recombination,ionization rate for each element
-        self.recombinationRatesCoefficient = np.zeros([self.input.maxIonization, self.numberOfElements])
+        self.recombinationRatesCoefficient = np.zeros([self.numRatesPerElement, self.numberOfElements])
         self.ionizationRates = np.zeros_like(self.recombinationRatesCoefficient)
         
         counter = 0 
         for ii in range(0,self.numberOfElements):
-            for jj in range(0,self.input.maxIonization):
-                axelrodrate = 10 * (jj+1)**2 * RRAxelrod(self.thermalElectronTemperature, jj+1)
+            for jj in range(0,self.numRatesPerElement):
+                axelrodrate = self.RecombinationAxelrodModified(jj+1)
                 if self.pathsOfRecombinationData[counter] == None:
                     rate = axelrodrate
                     self.outfile.write(f'no recomb data  found for {self.listOfAtomicNumbers[ii],jj+1} - using Axelrod rate of {rate:10.2e}\n')
@@ -133,14 +142,14 @@ class nonThermalBalance:
     
     def _setInitialIonizationBalance(self):
         #Initial Balance per element.  Will be discard later.
-        #Assuming an equal ionization. The code will eventually get something better.
-        balancePerElement = np.zeros(self.input.maxIonization)
+        #Assuming an ionization. The code will eventually get something better.
+        balancePerElement = np.zeros(self.numberIonStagesPerElement)
         balancePerElement[:] = 1.0 
         balancePerElement[2] = 2.0
         balancePerElement[3] = 2.0
         balancePerElement[:] /= balancePerElement.sum()
         
-        self.initBalance  = np.zeros(self.input.maxIonization * self.numberOfElements)
+        self.initBalance  = np.zeros( self.numberIonStagesPerElement * self.numberOfElements)
         self.initFraction = np.zeros_like(self.initBalance) 
         #Need total matter density for injection later.
         self.elementNumberDensities = np.zeros(self.numberOfElements)
@@ -150,6 +159,7 @@ class nonThermalBalance:
 
         self.expansion_volume = 0.0
         for ii in range(0,self.numberOfElements):
+            #this function call should be a method instead, too many arrays being modified manually.
             self.elementNumberDensities[ii],self.elementMassDensities[ii],self.nparticles [ii],self.expansion_volume = elementDensity(
                 self.listOfAtomicNumbers[ii],
                 self.massesOfElements[ii],
@@ -160,7 +170,8 @@ class nonThermalBalance:
         self.elementNumberDensityTotal = self.elementNumberDensities.sum()
         self.elementMassDensityTotal   = self.elementMassDensities  .sum()
 
-        stride = self.input.maxIonization
+        stride = self.numberIonStagesPerElement
+        
         for ii in range(0,self.numberOfElements):
             self.initBalance [ii * stride : (ii+1) * stride ] = balancePerElement * self.elementNumberDensities[ii]
             self.initFraction[ii * stride : (ii+1) * stride ] = balancePerElement
@@ -200,6 +211,7 @@ class nonThermalBalance:
                 import sys
                 print('Deposition Mode not set. Valid options: KasenBarnes, ArtisData, Override.') 
                 sys.exit()
+                
         return None 
     
     def _kasenBarnesDeposition(self):
@@ -213,6 +225,7 @@ class nonThermalBalance:
         except:
             pass
         return None 
+    
     def _artisDataDeposition(self):
         from pathlib import Path
         ROOT_DIR = Path(__file__).parent
@@ -228,9 +241,13 @@ class nonThermalBalance:
         return None 
     
     def setNewBalanceDamped(self):
+        '''
+        dumb method - to be removed.
+        '''
+        
         self.outfile.write('damping new ion balance...\n')
         self.damp = 0.2
-        stride = self.maxIonization
+        stride = self.maxIonizationPlus
         self.ionFraction = (1.0 - self.damp) * self.ionFraction + self.damp*self.ionFractionOld 
         #renormalize
         self.actualElectronDensity = 0.0 
@@ -240,11 +257,25 @@ class nonThermalBalance:
             thisfrac/= thisnorm
             self.ionFraction[aa * stride : (aa+1) * stride ] = thisfrac
             self.balance[aa * stride : (aa+1) * stride ]  = thisfrac * self.elementNumberDensities[aa]
-            self.actualElectronDensity += np.sum ( np.arange(0,self.maxIonization,1,dtype=int) * thisfrac * self.elementNumberDensities[aa])
+            self.actualElectronDensity += np.sum ( np.arange(0,self.maxIonizationPlus,1,dtype=int) * thisfrac * self.elementNumberDensities[aa])
         return None
     
+    def RecombinationAxelrodModified(self,totalCharge):
+        '''
+        Axelrod (1980) recombination rate boosted by a factor. 
+        Gives slightly better agreement for DR included rates. 
+        In principal, one should use calculated rates where available.
+        '''
+        
+        
+        return 10 * (totalCharge)**2 * RRAxelrod(self.thermalElectronTemperature, totalCharge)
+    
     def ionIter(self):
-        stride = self.maxIonization
+        '''
+        another dumb method - should probably be removed or at the very least refactored
+        '''
+        
+        stride = self.numberIonStagesPerElement
         
         self.actualElectronDensity = 0.0 
     
@@ -253,11 +284,11 @@ class nonThermalBalance:
             thisBalance = ionizationBalance(
                 self.ionizationRates[:,aa], 
                 self.electronDensityForIonization * self.recombinationRatesCoefficient[:,aa],Z
-                )[0:self.maxIonization]
+                )[0:stride]
             
             self.balance[aa * stride : (aa+1) * stride ]     = thisBalance * self.elementNumberDensities[aa]
             
-            self.actualElectronDensity += np.sum ( np.arange(0,self.maxIonization,1,dtype=int) * thisBalance * self.elementNumberDensities[aa])
+            self.actualElectronDensity += np.sum ( np.arange(0,self.numberIonStagesPerElement,1,dtype=int) * thisBalance * self.elementNumberDensities[aa])
             
             self.ionFraction[aa * stride : (aa+1) * stride ] = thisBalance 
         
@@ -267,28 +298,17 @@ class nonThermalBalance:
         #Calculate a new Ionization balance.
         self.balanceOld = self.balance.copy()
         self.ionFractionOld = self.ionFraction.copy() 
+        
+        #set the e dense for the ionization balance.
         if self.imposedElectronDensityRecombination is not None:
             self.electronDensityForIonization = self.imposedElectronDensityRecombination
         else:
             self.electronDensityForIonization = self.electronDensity
+            
         self.outfile.write(f'Calculating Ionization Balance, using initial electron density {self.electronDensityForIonization:10.2e}\n')
 
         self.ionIter()
-        
-        #if self.imposedElectronDensitySF is None:
-        #    counter = 0
-        #    for _ in range(0,MAXITER):
-        #        conv = (self.electronDensityForIonization - self.actualElectronDensity) / self.electronDensityForIonization
-        #        self.outfile.write(f'    {self.electronDensityForIonization:10.2e} {self.actualElectronDensity:10.2e} {conv:10.2e}\n')
-#
-        #        self.electronDensityForIonization = self.actualElectronDensity 
-        #        if (abs(conv) < TOLERANCE):
-        #            break
-        #        self.ionIter()
-        #        counter += 1
-        #    self.outfile.write(f'    Self consistency on electron density converged to {self.electronDensityForIonization:10.2e} in {counter:3} iterations.\n')
-        
-        #self.electronDensity = self.electronDensityForIonization
+
         self.outfile.write('Ionization iteration: \n')
         self.outfile.write(f' Electrons contributed by the part of the gas is: mycalc (afterThisIter): {self.actualElectronDensity:10.2e} pynt (before): {self.electronDensityPYNT:10.2e}\n')
         self.outfile.write(' The electron fraction x_e = {:10.2e}\n'.format(self.sf.get_n_e() / self.elementNumberDensityTotal))
@@ -297,7 +317,7 @@ class nonThermalBalance:
         counter = 0 
         self.outfile.write('AN Charge  FracBefore FracAfter  %Change\n')
         for aa,atomicnumber in enumerate(self.listOfAtomicNumbers):
-            for ii in range(0,self.maxIonization):
+            for ii in range(0,self.numberIonStagesPerElement):
                 cc = (self.ionFractionOld[counter]-self.ionFraction[counter])/self.ionFractionOld[counter]
                 self.outfile.write(f'{atomicnumber:3} {ii:2}+  {self.ionFractionOld[counter]:10.2e} {self.ionFraction[counter]:10.2e} {cc:10.2e} {self.sf.get_eff_ionpot(atomicnumber,ii+1):10.2e}\n')
                 counter += 1
@@ -319,14 +339,14 @@ class nonThermalBalance:
         ions = []
         counter = 0 
         for atomicNumber in self.listOfAtomicNumbers:
-            for ii in range(0,self.input.maxIonization):
+            for ii in range(0,self.numberIonStagesPerElement):
                 ions.append(
                     (atomicNumber,ii+1,self.balance[counter])
                 )
                 counter += 1
         
         #Pass this array to initialize the Spencer-Fano solver.
-        self.sf = pynonthermal.SpencerFanoSolver(emin_ev=1, emax_ev=3000, npts=400, verbose=True)
+        self.sf = pynonthermal.SpencerFanoSolver(emin_ev=1, emax_ev=3000, npts=400, verbose=False)
         for Z, ion_stage, n_ion in ions:
             #print('debug:',Z,ion_stage,n_ion)
             self.sf.add_ionisation(Z, ion_stage, n_ion)
@@ -352,7 +372,7 @@ class nonThermalBalance:
         
         #Pass the calculated Ionization Rates back to the self class. 
         for aa in range(0,self.numberOfElements):
-            for ii in range(0,self.input.maxIonization):
+            for ii in range(0,self.input.maxIonizationPlus):
                 self.ionizationRates[ii,aa] = self.sf.get_ionisation_ratecoeff(self.listOfAtomicNumbers[aa], ii+1)
         
         
@@ -381,18 +401,31 @@ class nonThermalBalance:
                                     sum(self.massesOfElements)
                                     )
         file.write(header)
-        
-        writeFormat = '{:>3}, {:4}, {:2}{:2}, {:>2}+->{:>2}+, {:12.6e}, {:12.6e}, {:12.6e}, {:12.6e}, {:12.6e}\n'
+        header      = '#Sym,  ATN,CODE,   z+,    EffIonPot,   IonRateOut,    RecRateIn,   FracOfElem,   Mass(Msun) \n'
+        writeFormat = '{:>4}, {:4}, {:2}{:2}, {:>2}+, {:12.6e}, {:12.6e}, {:12.6e}, {:12.6e}, {:12.6e}\n'
         counter = 0
+        file.write(header)
         for aa,atomicNumber in enumerate(self.listOfAtomicNumbers):
             
-            for ii in range(0,self.maxIonization):
-                file.write(writeFormat.format(
-                  str(periodictable.elements[atomicNumber]),
-                  atomicNumber,
-                  atomicNumber,atomicNumber-ii,ii,ii+1,self.sf.get_eff_ionpot(atomicNumber,ii+1),self.ionizationRates[ii,aa],
-                  self.recombinationRatesCoefficient[ii,aa]*self.electronDensityForIonization,self.ionFraction[counter],self.ionFraction[counter] * self.massesOfElements[aa]
-                ))
+            for ii in range(0,self.numberIonStagesPerElement):
+                
+                if ii == self.numberIonStagesPerElement-1:
+                      file.write(writeFormat.format(
+                      str(periodictable.elements[atomicNumber]),
+                      atomicNumber,
+                      atomicNumber,atomicNumber-ii,ii,self.sf.get_eff_ionpot(atomicNumber,ii+1),0,
+                      0,self.ionFraction[counter],self.ionFraction[counter] * self.massesOfElements[aa]
+                    ))
+                else:
+                
+                    file.write(writeFormat.format(
+                      str(periodictable.elements[atomicNumber]),
+                      atomicNumber,
+                      atomicNumber,atomicNumber-ii,ii,self.sf.get_eff_ionpot(atomicNumber,ii+1),self.ionizationRates[ii,aa],
+                      self.recombinationRatesCoefficient[ii,aa]*self.electronDensityForIonization,self.ionFraction[counter],self.ionFraction[counter] * self.massesOfElements[aa]
+                    ))
+                
+                
                 counter += 1 
         
         file.close()
